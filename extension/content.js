@@ -442,7 +442,8 @@
   // under a key called "value" and a key-name match never finds it. Capture the
   // pair instead: that also yields shipping and voucher lines, which are exactly
   // the difference between summed item prices and what was actually charged.
-  const MONEYISH = /^\s*-?\s*(?:฿|THB|RM|Rp|S\$|₱|₫)\s?-?[\d][\d,.]*\s*$/;
+  // Singapore writes a bare "$34.58" / "-$34.58", so a plain $ counts too.
+  const MONEYISH = /^\s*-?\s*(?:฿|THB|RM|Rp|S\$|₱|₫|\$)\s?-?[\d][\d,.]*\s*$/;
   const LABEL_KEYS = ['title', 'label', 'name', 'key', 'text', 'desc', 'content'];
   const VALUE_KEYS = ['value', 'price', 'amount', 'text', 'content', 'desc', 'subTitle'];
 
@@ -463,7 +464,7 @@
 
   function harvest(root) {
     // stamps keeps every date value in order; dates only the first per key.
-    const out = { dates: {}, stamps: [], pay: {}, total: {}, lines: {} };
+    const out = { dates: {}, stamps: [], pay: {}, total: {}, lines: {}, orderTotal: '' };
     const seen = new Set();
     (function walk(n, depth) {
       if (!n || typeof n !== 'object' || depth > 8 || seen.has(n)) return;
@@ -471,6 +472,17 @@
       if (Array.isArray(n)) { n.forEach((v) => walk(v, depth + 1)); return; }
       const pair = labelledAmount(n);
       if (pair && !(pair.label in out.lines)) out.lines[pair.label] = pair.value;
+      // The order's summary block (Lazada SG): { totalKey: "Total: ", total: "$1.99" }.
+      // It is the whole order's total, and is there even when the package
+      // breakdown has no "Total:" row (older, multi-package and RedMart orders).
+      if (!out.orderTotal && typeof n.totalKey === 'string' && MONEYISH.test(String(n.total == null ? '' : n.total))) {
+        out.orderTotal = String(n.total).trim();
+      }
+      // { key: "Paid by", value: "Credit/Debit Card(*1234)", subValue: "$1.99" }: the method is the value.
+      if (typeof n.key === 'string' && /^(paid by|payment method)$/i.test(n.key.trim())
+          && typeof n.value === 'string' && n.value.trim() && !MONEYISH.test(n.value) && !out.pay.paidBy) {
+        out.pay.paidBy = n.value.trim();
+      }
       for (const [k, v] of Object.entries(n)) {
         if (isScalar(v) && v !== null && String(v).trim()) {
           const sv = String(v).trim();
@@ -564,13 +576,17 @@
 
   // Orders the detail pass has not dated yet. An update only adds a handful,
   // so re-reading every order would waste ten minutes on known answers.
+  // Bumped when the detail pass learns to read more, so orders read by an older
+  // version are offered again (2: amounts and payment method on Lazada SG).
+  const DETAILS_VERSION = '2';
+
   function undatedOrders() {
     const dated = new Set();
     const all = [];
     for (const r of state.rows) {
       const id = String(r.orderId || '');
       if (!id) continue;
-      if (r.purchasedAt) dated.add(id);
+      if (r.purchasedAt && r.detailsVersion === DETAILS_VERSION) dated.add(id);
       if (!all.includes(id)) all.push(id);
     }
     return all.filter((id) => !dated.has(id));
@@ -802,6 +818,7 @@
     for (const r of state.rows) {
       const h = enrich.get(String(r.orderId));
       if (!h) continue;
+      r.detailsVersion = DETAILS_VERSION;
       const lines = h.lines || {};
 
       const sums = {};
@@ -811,7 +828,8 @@
         sums[k] = (sums[k] || 0) + amount(value);
       }
 
-      const charged = amount(pick(h.total, ['totalamount', 'grandtotal', 'ordertotal'], 'any'))
+      const charged = amount(h.orderTotal)
+        || amount(pick(h.total, ['totalamount', 'grandtotal', 'ordertotal'], 'any'))
         || sums.total || sums.package_total || 0;
       if (charged) { r.orderTotal = fmt(charged); totalled++; }
       r.subtotal     = fmt(sums.subtotal);
@@ -831,7 +849,7 @@
       if (paid) r.paidAt = paid;
       // No breakdown fallback here: the breakdown only holds money values, and a
       // payment method is not one, so it never appears there.
-      if (!r.paymentMethod) r.paymentMethod = pick(h.pay, ['paymentmethod', 'paymentdes', 'paymethod'], 'any');
+      if (!r.paymentMethod) r.paymentMethod = pick(h.pay, ['paymentmethod', 'paymentdes', 'paymethod', 'paidby'], 'any');
     }
     log(`Detail pass done — dated ${filled} rows, charged total on ${totalled}, across ${enrich.size} orders.`);
     return enrich.size;
@@ -858,7 +876,7 @@
   // Filled by the detail pass, never by the list. A refreshed row keeps them so
   // an update does not throw away dates that took minutes to fetch.
   const DETAIL_FIELDS = ['purchasedAt', 'paidAt', 'shippingFee', 'discount', 'subtotal', 'cashback',
-                         'refundAmount', 'charges', 'orderTotal', 'paymentMethod'];
+                         'refundAmount', 'charges', 'orderTotal', 'paymentMethod', 'detailsVersion'];
 
   function carryDetails(row, prev) {
     if (!prev) return row;
