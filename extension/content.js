@@ -890,7 +890,7 @@
     return '';
   };
 
-  // "br…@gmail.com": enough to tell two household accounts apart in the popup.
+  // Masked for display, e.g. "jo…@example.com".
   const maskAccount = (email) => {
     const [user, domain] = String(email || '').split('@');
     return user && domain ? `${user.slice(0, 2)}…@${domain}` : '';
@@ -1000,8 +1000,8 @@
 
       const first = await fetchPage(cap, start);
       if (first.empty) throw new Error(`page ${start}: no order items in response`);
-      // Signed in as someone else since the last export (e.g. a partner's account in
-      // the same browser): their orders must not be added to the previous account's.
+      // A different account than the saved export's: start a new export rather
+      // than merging two accounts' orders.
       const was = accountOf(prior);
       const now = accountOf(first.rows);
       if (merging && was && now && was !== now) {
