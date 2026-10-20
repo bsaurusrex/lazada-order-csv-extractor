@@ -442,7 +442,8 @@
   // under a key called "value" and a key-name match never finds it. Capture the
   // pair instead: that also yields shipping and voucher lines, which are exactly
   // the difference between summed item prices and what was actually charged.
-  const MONEYISH = /^\s*-?\s*(?:฿|THB|RM|Rp|S\$|₱|₫)\s?-?[\d][\d,.]*\s*$/;
+  // Singapore writes a bare "$34.58" / "-$34.58", so a plain $ counts too.
+  const MONEYISH = /^\s*-?\s*(?:฿|THB|RM|Rp|S\$|₱|₫|\$)\s?-?[\d][\d,.]*\s*$/;
   const LABEL_KEYS = ['title', 'label', 'name', 'key', 'text', 'desc', 'content'];
   const VALUE_KEYS = ['value', 'price', 'amount', 'text', 'content', 'desc', 'subTitle'];
 
@@ -471,6 +472,11 @@
       if (Array.isArray(n)) { n.forEach((v) => walk(v, depth + 1)); return; }
       const pair = labelledAmount(n);
       if (pair && !(pair.label in out.lines)) out.lines[pair.label] = pair.value;
+      // { key: "Paid by", value: "Credit/Debit Card", subValue: "$1.99" }: the method is the value.
+      if (typeof n.key === 'string' && /^(paid by|payment method)$/i.test(n.key.trim())
+          && typeof n.value === 'string' && n.value.trim() && !MONEYISH.test(n.value) && !out.pay.paidBy) {
+        out.pay.paidBy = n.value.trim();
+      }
       for (const [k, v] of Object.entries(n)) {
         if (isScalar(v) && v !== null && String(v).trim()) {
           const sv = String(v).trim();
@@ -564,13 +570,17 @@
 
   // Orders the detail pass has not dated yet. An update only adds a handful,
   // so re-reading every order would waste ten minutes on known answers.
+  // Bumped when the detail pass learns to read more, so orders read by an older
+  // version are offered again (2: amounts and payment method on Lazada SG).
+  const DETAILS_VERSION = '2';
+
   function undatedOrders() {
     const dated = new Set();
     const all = [];
     for (const r of state.rows) {
       const id = String(r.orderId || '');
       if (!id) continue;
-      if (r.purchasedAt) dated.add(id);
+      if (r.purchasedAt && r.detailsVersion === DETAILS_VERSION) dated.add(id);
       if (!all.includes(id)) all.push(id);
     }
     return all.filter((id) => !dated.has(id));
@@ -802,6 +812,7 @@
     for (const r of state.rows) {
       const h = enrich.get(String(r.orderId));
       if (!h) continue;
+      r.detailsVersion = DETAILS_VERSION;
       const lines = h.lines || {};
 
       const sums = {};
@@ -831,7 +842,7 @@
       if (paid) r.paidAt = paid;
       // No breakdown fallback here: the breakdown only holds money values, and a
       // payment method is not one, so it never appears there.
-      if (!r.paymentMethod) r.paymentMethod = pick(h.pay, ['paymentmethod', 'paymentdes', 'paymethod'], 'any');
+      if (!r.paymentMethod) r.paymentMethod = pick(h.pay, ['paymentmethod', 'paymentdes', 'paymethod', 'paidby'], 'any');
     }
     log(`Detail pass done — dated ${filled} rows, charged total on ${totalled}, across ${enrich.size} orders.`);
     return enrich.size;
@@ -855,10 +866,17 @@
     return added;
   }
 
+  // Which Lazada account rows belong to: the buyer address the list returns on
+  // every row. Compared only, never logged or shown.
+  const accountOf = (rows) => {
+    for (const r of rows) if (r && r['raw.buyerEmail']) return String(r['raw.buyerEmail']).trim().toLowerCase();
+    return '';
+  };
+
   // Filled by the detail pass, never by the list. A refreshed row keeps them so
   // an update does not throw away dates that took minutes to fetch.
   const DETAIL_FIELDS = ['purchasedAt', 'paidAt', 'shippingFee', 'discount', 'subtotal', 'cashback',
-                         'refundAmount', 'charges', 'orderTotal', 'paymentMethod'];
+                         'refundAmount', 'charges', 'orderTotal', 'paymentMethod', 'detailsVersion'];
 
   function carryDetails(row, prev) {
     if (!prev) return row;
@@ -897,11 +915,11 @@
     // Either way, rows from before keep their dates and anything not re-read
     // is carried over. An explicit page range or "full" starts from nothing.
     const start = opts.startPage || 1;
-    const merging = !opts.full && start === 1 && !opts.endPage && state.rows.length > 0;
-    const prior = merging ? state.rows : [];
-    const priorByKey = new Map(prior.map((r) => [rowKey(r), r]));
-    const stopEarly = merging && state.complete;
-    const hadDates = prior.some((r) => r.purchasedAt);
+    let merging = !opts.full && start === 1 && !opts.endPage && state.rows.length > 0;
+    let prior = merging ? state.rows : [];
+    let priorByKey = new Map(prior.map((r) => [rowKey(r), r]));
+    let stopEarly = merging && state.complete;
+    let hadDates = prior.some((r) => r.purchasedAt);
 
     state.running = true;
     state.cancel = false;
@@ -959,6 +977,15 @@
 
       const first = await fetchPage(cap, start);
       if (first.empty) throw new Error(`page ${start}: no order items in response`);
+      // Signed in as someone else since the last export (e.g. a partner's account in
+      // the same browser): their orders must not be added to the previous account's.
+      const was = accountOf(prior);
+      const now = accountOf(first.rows);
+      if (merging && was && now && was !== now) {
+        log('This is a different Lazada account from your last export, so this is a new export for it. The last account\'s export is replaced: save it first if you still need it.');
+        merging = false; prior = []; priorByKey = new Map(); stopEarly = false; hadDates = false;
+        state.phase = 'list';
+      }
       let total = opts.endPage || first.totalPages || detectTotalPages();
       // A chosen range, or a page count guessed from the pager, can end early.
       const trustEnd = !opts.endPage && !!first.totalPages;
