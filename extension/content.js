@@ -11,6 +11,11 @@
 
   const CAP_KEY = 'lzx_captures';
   const RESULT_KEY = 'lzx_result';
+  // Requests are replayed only if recorded since this page loaded. A request
+  // saved in an earlier session carries that session's context: replayed after
+  // signing in as someone else, it can return the earlier account's orders.
+  const SESSION_START = Date.now();
+  const fresh = (c) => (c.ts || 0) >= SESSION_START;
 
   const state = {
     captures: [],
@@ -67,6 +72,7 @@
   const store = {
     set(k, v) { try { chrome.storage.local.set({ [k]: v }); } catch (_) {} },
     get(k) { return new Promise((res) => { try { chrome.storage.local.get(k, (o) => res(o && o[k])); } catch (_) { res(null); } }); },
+    remove(keys) { return new Promise((res) => { try { chrome.storage.local.remove(keys, () => res()); } catch (_) { res(); } }); },
   };
 
   // Captures arrive over a transferred MessagePort so they are not broadcast to
@@ -320,6 +326,7 @@
   function pickCapture() {
     for (let i = state.captures.length - 1; i >= 0; i--) {
       const rec = state.captures[i];
+      if (!fresh(rec)) continue;
       const resp = safeParse(rec.body);
       if (!resp || !parseUltron(resp, 1)) continue;
       const pager = buildPager(rec);
@@ -513,7 +520,7 @@
   function pickDetailCapture(idSet) {
     for (let i = state.captures.length - 1; i >= 0; i--) {
       const rec = state.captures[i];
-      if (!rec.reqBody) continue;
+      if (!rec.reqBody || !fresh(rec)) continue;
       const resp = safeParse(rec.body);
       if (!resp) continue;
       const h = harvest(resp);
@@ -855,6 +862,18 @@
     return added;
   }
 
+  // Which Lazada account rows belong to: the buyer address the list returns on
+  // every row. Compared, and shown masked in the popup.
+  const accountOf = (rows) => {
+    for (const r of rows) if (r && r['raw.buyerEmail']) return String(r['raw.buyerEmail']).trim().toLowerCase();
+    return '';
+  };
+  // Masked for display, e.g. "jo…@example.com".
+  const maskAccount = (email) => {
+    const [user, domain] = String(email || '').split('@');
+    return user && domain ? `${user.slice(0, 2)}…@${domain}` : '';
+  };
+
   // Filled by the detail pass, never by the list. A refreshed row keeps them so
   // an update does not throw away dates that took minutes to fetch.
   const DETAIL_FIELDS = ['purchasedAt', 'paidAt', 'shippingFee', 'discount', 'subtotal', 'cashback',
@@ -897,11 +916,11 @@
     // Either way, rows from before keep their dates and anything not re-read
     // is carried over. An explicit page range or "full" starts from nothing.
     const start = opts.startPage || 1;
-    const merging = !opts.full && start === 1 && !opts.endPage && state.rows.length > 0;
-    const prior = merging ? state.rows : [];
-    const priorByKey = new Map(prior.map((r) => [rowKey(r), r]));
-    const stopEarly = merging && state.complete;
-    const hadDates = prior.some((r) => r.purchasedAt);
+    let merging = !opts.full && start === 1 && !opts.endPage && state.rows.length > 0;
+    let prior = merging ? state.rows : [];
+    let priorByKey = new Map(prior.map((r) => [rowKey(r), r]));
+    let stopEarly = merging && state.complete;
+    let hadDates = prior.some((r) => r.purchasedAt);
 
     state.running = true;
     state.cancel = false;
@@ -959,6 +978,15 @@
 
       const first = await fetchPage(cap, start);
       if (first.empty) throw new Error(`page ${start}: no order items in response`);
+      // A different account than the saved export's: start a new export rather
+      // than merging two accounts' orders.
+      const was = accountOf(prior);
+      const now = accountOf(first.rows);
+      if (merging && was && now && was !== now) {
+        log('This is a different Lazada account from your last export, so this is a new export for it. The last account\'s export is replaced: save it first if you still need it.');
+        merging = false; prior = []; priorByKey = new Map(); stopEarly = false; hadDates = false;
+        state.phase = 'list';
+      }
       let total = opts.endPage || first.totalPages || detectTotalPages();
       // A chosen range, or a page count guessed from the pager, can end early.
       const trustEnd = !opts.endPage && !!first.totalPages;
@@ -1093,6 +1121,7 @@
           phase: state.phase,
           rows: state.rows.length,
           orders: new Set(state.rows.map((r) => r.orderId)).size,
+          account: maskAccount(accountOf(state.rows)),
           undated: undatedOrders().length,
           complete: state.complete,
           progress: state.progress,
@@ -1120,6 +1149,22 @@
             })
             .catch((e) => finish(`Detail pass failed: ${e.message}`));
           respond({ ok: true });
+        }
+      } else if (msg.cmd === 'reset') {
+        // Forget the saved export and every recorded request, e.g. before
+        // exporting a second Lazada account in the same browser.
+        if (state.running) respond({ ok: false, error: 'Stop the current run first' });
+        else {
+          store.remove([CAP_KEY, RESULT_KEY]).then(() => {
+            state.captures = []; state.rows = []; state.raw = [];
+            state.done = false; state.complete = false; state.detailError = '';
+            state.failedIds = new Set();
+            state.progress = { done: 0, total: 0, message: 'Ready' };
+            state.log = ['Reset: the saved export and recorded requests are forgotten. Export again for whoever is signed in.'];
+            invalidate();
+            respond({ ok: true });
+          });
+          return true;
         }
       } else if (msg.cmd === 'cancel') {
         state.cancel = true; respond({ ok: true });

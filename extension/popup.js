@@ -48,7 +48,7 @@ function paint(s) {
 
   if (s.rows) {
     $('count').textContent = n(s.rows);
-    $('sub').textContent = `items from ${n(s.orders)} orders`;
+    $('sub').textContent = `items from ${n(s.orders)} orders` + (s.account ? ` (${s.account})` : '');
   } else {
     $('count').textContent = s.totalPages ? n(s.totalPages) : '—';
     $('sub').textContent = s.totalPages === 1 ? 'page ready to export' : 'pages ready to export';
@@ -86,6 +86,7 @@ function paint(s) {
   $('csv').disabled = !s.rows || s.running;
   $('json').disabled = !s.rows || s.running;
   $('sample').disabled = s.running || !s.captures;
+  $('reset').disabled = s.running;
   $('report').disabled = !s.rows || s.running || savingReport;
 
   // Only undated orders are read, so after an update this is a short pass.
@@ -138,6 +139,21 @@ on('dates', async () => {
 on('csv', () => send({ cmd: 'csv' }));
 on('json', () => send({ cmd: 'json' }));
 on('sample', () => send({ cmd: 'sample' }));
+// Two clicks, so a stray one can't throw away an export that took minutes.
+let resetArmed = null;
+on('reset', async () => {
+  if (!resetArmed) {
+    $('reset').textContent = 'Click again to forget everything';
+    resetArmed = setTimeout(() => { resetArmed = null; $('reset').textContent = 'Reset everything'; }, 4000);
+    return;
+  }
+  clearTimeout(resetArmed); resetArmed = null;
+  $('reset').textContent = 'Reset everything';
+  const res = await send({ cmd: 'reset' });
+  if (!res.ok) $('phase').textContent = res.error || 'Could not reset.';
+  refresh();
+});
+
 // Building the page takes a moment with nothing visible happening; without
 // this a second click saves a second copy.
 let savingReport = false;
