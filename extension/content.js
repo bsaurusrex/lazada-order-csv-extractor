@@ -11,6 +11,11 @@
 
   const CAP_KEY = 'lzx_captures';
   const RESULT_KEY = 'lzx_result';
+  // Requests are replayed only if recorded since this page loaded. A request
+  // saved in an earlier session carries that session's context: replayed after
+  // signing in as someone else, it can return the earlier account's orders.
+  const SESSION_START = Date.now();
+  const fresh = (c) => (c.ts || 0) >= SESSION_START;
 
   const state = {
     captures: [],
@@ -67,6 +72,7 @@
   const store = {
     set(k, v) { try { chrome.storage.local.set({ [k]: v }); } catch (_) {} },
     get(k) { return new Promise((res) => { try { chrome.storage.local.get(k, (o) => res(o && o[k])); } catch (_) { res(null); } }); },
+    remove(keys) { return new Promise((res) => { try { chrome.storage.local.remove(keys, () => res()); } catch (_) { res(); } }); },
   };
 
   // Captures arrive over a transferred MessagePort so they are not broadcast to
@@ -320,6 +326,7 @@
   function pickCapture() {
     for (let i = state.captures.length - 1; i >= 0; i--) {
       const rec = state.captures[i];
+      if (!fresh(rec)) continue;
       const resp = safeParse(rec.body);
       if (!resp || !parseUltron(resp, 1)) continue;
       const pager = buildPager(rec);
@@ -519,7 +526,7 @@
   function pickDetailCapture(idSet) {
     for (let i = state.captures.length - 1; i >= 0; i--) {
       const rec = state.captures[i];
-      if (!rec.reqBody) continue;
+      if (!rec.reqBody || !fresh(rec)) continue;
       const resp = safeParse(rec.body);
       if (!resp) continue;
       const h = harvest(resp);
@@ -1170,6 +1177,22 @@
             })
             .catch((e) => finish(`Detail pass failed: ${e.message}`));
           respond({ ok: true });
+        }
+      } else if (msg.cmd === 'reset') {
+        // Forget the saved export and every recorded request, e.g. before
+        // exporting a second Lazada account in the same browser.
+        if (state.running) respond({ ok: false, error: 'Stop the current run first' });
+        else {
+          store.remove([CAP_KEY, RESULT_KEY]).then(() => {
+            state.captures = []; state.rows = []; state.raw = [];
+            state.done = false; state.complete = false; state.detailError = '';
+            state.failedIds = new Set();
+            state.progress = { done: 0, total: 0, message: 'Ready' };
+            state.log = ['Reset: the saved export and recorded requests are forgotten. Export again for whoever is signed in.'];
+            invalidate();
+            respond({ ok: true });
+          });
+          return true;
         }
       } else if (msg.cmd === 'cancel') {
         state.cancel = true; respond({ ok: true });
