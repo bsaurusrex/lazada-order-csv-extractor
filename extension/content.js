@@ -471,7 +471,7 @@
 
   function harvest(root) {
     // stamps keeps every date value in order; dates only the first per key.
-    const out = { dates: {}, stamps: [], pay: {}, total: {}, lines: {} };
+    const out = { dates: {}, stamps: [], pay: {}, total: {}, lines: {}, orderTotal: '' };
     const seen = new Set();
     (function walk(n, depth) {
       if (!n || typeof n !== 'object' || depth > 8 || seen.has(n)) return;
@@ -479,6 +479,12 @@
       if (Array.isArray(n)) { n.forEach((v) => walk(v, depth + 1)); return; }
       const pair = labelledAmount(n);
       if (pair && !(pair.label in out.lines)) out.lines[pair.label] = pair.value;
+      // The order's summary block (Lazada SG): { totalKey: "Total: ", total: "$1.99" }.
+      // It is the whole order's total, and is there even when the package
+      // breakdown has no "Total:" row (older, multi-package and RedMart orders).
+      if (!out.orderTotal && typeof n.totalKey === 'string' && MONEYISH.test(String(n.total == null ? '' : n.total))) {
+        out.orderTotal = String(n.total).trim();
+      }
       // { key: "Paid by", value: "Credit/Debit Card", subValue: "$1.99" }: the method is the value.
       if (typeof n.key === 'string' && /^(paid by|payment method)$/i.test(n.key.trim())
           && typeof n.value === 'string' && n.value.trim() && !MONEYISH.test(n.value) && !out.pay.paidBy) {
@@ -578,8 +584,9 @@
   // Orders the detail pass has not dated yet. An update only adds a handful,
   // so re-reading every order would waste ten minutes on known answers.
   // Bumped when the detail pass learns to read more, so orders read by an older
-  // version are offered again (2: amounts and payment method on Lazada SG).
-  const DETAILS_VERSION = '2';
+  // version are offered again (2: amounts and payment method on Lazada SG;
+  // 3: the order total from the summary block).
+  const DETAILS_VERSION = '3';
 
   function undatedOrders() {
     const dated = new Set();
@@ -587,7 +594,9 @@
     for (const r of state.rows) {
       const id = String(r.orderId || '');
       if (!id) continue;
-      if (r.purchasedAt && r.detailsVersion === DETAILS_VERSION) dated.add(id);
+      // Version 2 read everything but the summary-block total, so its orders
+      // with a total are complete too.
+      if (r.purchasedAt && (r.detailsVersion === DETAILS_VERSION || (r.detailsVersion === '2' && r.orderTotal))) dated.add(id);
       if (!all.includes(id)) all.push(id);
     }
     return all.filter((id) => !dated.has(id));
@@ -829,7 +838,8 @@
         sums[k] = (sums[k] || 0) + amount(value);
       }
 
-      const charged = amount(pick(h.total, ['totalamount', 'grandtotal', 'ordertotal'], 'any'))
+      const charged = amount(h.orderTotal)
+        || amount(pick(h.total, ['totalamount', 'grandtotal', 'ordertotal'], 'any'))
         || sums.total || sums.package_total || 0;
       if (charged) { r.orderTotal = fmt(charged); totalled++; }
       r.subtotal     = fmt(sums.subtotal);
