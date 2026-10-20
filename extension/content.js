@@ -1026,8 +1026,17 @@
         await runDetails(opts.delayMs || 400);
       }
 
-      if (state.rows.length) downloadCsv();
       const orders = new Set(state.rows.map((r) => r.orderId)).size;
+      // An update that found nothing new has nothing new to save: say so, and
+      // point at the detail pass when orders still lack details.
+      if (merging && !fresh && !state.cancel) {
+        const todo = undatedOrders().length;
+        finish(`No new orders since your last export (${orders} orders).` + (todo
+          ? ` ${todo} ${todo === 1 ? 'order still needs' : 'orders still need'} details: press "Add purchase dates".`
+          : ' Press "Save CSV again" for a copy.'));
+        return;
+      }
+      if (state.rows.length) downloadCsv();
       finish(state.cancel
         ? `Stopped. ${state.rows.length} rows kept — CSV downloaded.`
         : merging
