@@ -1039,10 +1039,16 @@
     return '﻿' + [cols.join(','), ...rows.map((r) => cols.map((c) => esc(r[c])).join(','))].join('\n');
   }
 
-  function download(name, text, mime) {
-    const url = URL.createObjectURL(new Blob([text], { type: `${mime};charset=utf-8` }));
+  // Saving from inside the page is an automatic download as far as Chrome is
+  // concerned (the click happened in the popup, not here): the first one is
+  // allowed, then Chrome blocks or quietly asks about every later one. So files
+  // the popup asks for go back to it and it saves them from its own click (see
+  // saveFile in popup.js). Only the end-of-run CSV, with no click behind it,
+  // is still saved from here.
+  function download(file) {
+    const url = URL.createObjectURL(new Blob([file.text], { type: `${file.mime};charset=utf-8` }));
     const a = document.createElement('a');
-    a.href = url; a.download = name;
+    a.href = url; a.download = file.name;
     // Deliberately not appended to the document: a blob URL in the page DOM is
     // readable by any script on the page, and this blob is the whole export.
     a.click();
@@ -1066,13 +1072,14 @@
     const safe = (v) => JSON.stringify(v).replace(/</g, '\\u003c');
     const html = tpl.replace('/*__DATA__*/[]', () => safe(slim))
                     .replace('/*__META__*/{}', () => safe(meta));
-    download(`lazada-purchases-${stamp()}.html`, html, 'text/html');
     log(`Saved a browsable page with ${slim.length} items.`);
+    return { name: `lazada-purchases-${stamp()}.html`, text: html, mime: 'text/html' };
   }
 
   const stamp = () => new Date().toISOString().slice(0, 10);
-  const downloadCsv = () => download(`lazada-orders-${stamp()}.csv`, toCsv(state.rows), 'text/csv');
-  const downloadJson = () => download(`lazada-orders-${stamp()}.json`, JSON.stringify(state.raw.length ? state.raw : state.rows, null, 2), 'application/json');
+  const csvFile = () => ({ name: `lazada-orders-${stamp()}.csv`, text: toCsv(state.rows), mime: 'text/csv' });
+  const jsonFile = () => ({ name: `lazada-orders-${stamp()}.json`, text: JSON.stringify(state.raw.length ? state.raw : state.rows, null, 2), mime: 'application/json' });
+  const downloadCsv = () => download(csvFile());
 
   // --------------------------------------------------------------- messaging
   // The hidden frame only records; the popup talks to the top frame alone.
@@ -1114,7 +1121,7 @@
           state.running = true; state.cancel = false; state.done = false;
           runDetails(msg.delayMs || 400)
             .then((n) => {
-              if (n) { downloadCsv(); finish('Dates added — CSV re-downloaded.'); }
+              if (n) { downloadCsv(); finish('Dates added — CSV re-downloaded. If no file appeared, press Save CSV again.'); }
               else finish(state.detailError
                 || (undatedOrders().length ? 'No dates were added; the CSV is unchanged.' : 'Every order already has a date.'));
             })
@@ -1124,11 +1131,11 @@
       } else if (msg.cmd === 'cancel') {
         state.cancel = true; respond({ ok: true });
       } else if (msg.cmd === 'csv') {
-        downloadCsv(); respond({ ok: true, rows: state.rows.length });
+        respond({ ok: true, rows: state.rows.length, file: csvFile() });
       } else if (msg.cmd === 'json') {
-        downloadJson(); respond({ ok: true, rows: state.rows.length });
+        respond({ ok: true, rows: state.rows.length, file: jsonFile() });
       } else if (msg.cmd === 'report') {
-        buildReport().then(() => respond({ ok: true })).catch((e) => respond({ ok: false, error: e.message }));
+        buildReport().then((file) => respond({ ok: true, file })).catch((e) => respond({ ok: false, error: e.message }));
         return true;
       } else if (msg.cmd === 'sample') {
         // Ground truth for mapping fields the harvest does not recognise.
@@ -1137,13 +1144,12 @@
         const rec = cap ? cap.rec : state.captures[state.captures.length - 1];
         if (!rec) { respond({ ok: false, error: 'Nothing recorded yet' }); }
         else {
-          download('lazada-detail-sample.json', JSON.stringify({
+          respond({ ok: true, file: { name: 'lazada-detail-sample.json', mime: 'application/json', text: JSON.stringify({
             url: rec.url, method: rec.method,
             note: 'Request headers omitted: they carry session and CSRF tokens.',
             requestBody: safeParse(rec.reqBody) || rec.reqBody,
             response: safeParse(rec.body) || rec.body,
-          }, null, 2), 'application/json');
-          respond({ ok: true });
+          }, null, 2) } });
         }
       } else {
         respond({ ok: false, error: 'unknown command' });

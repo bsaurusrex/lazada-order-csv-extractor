@@ -28,6 +28,25 @@ const send = (msg) => new Promise((resolve) => {
   });
 });
 
+// Save a file the page handed back. Saving it here, from the popup's own click,
+// is a download the person asked for; saved from the Lazada page it counts as an
+// automatic download, which Chrome allows once and then blocks or asks about.
+function saveFile(file) {
+  const url = URL.createObjectURL(new Blob([file.text], { type: `${file.mime};charset=utf-8` }));
+  const a = document.createElement('a');
+  a.href = url; a.download = file.name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+// Ask the page for a file and save it, or say why not.
+async function fetchAndSave(cmd) {
+  const res = await send({ cmd });
+  if (res.ok && res.file) saveFile(res.file);
+  else $('phase').textContent = res.error || 'Could not save the file.';
+  return res;
+}
+
 // Loading an extension does not inject content scripts into already-open tabs,
 // so inject on demand rather than making people reload.
 async function ensureInjected() {
@@ -135,9 +154,9 @@ on('dates', async () => {
   await send({ cmd: 'details', delayMs: Math.max(0, Number($('delay').value) || 0) });
   refresh();
 });
-on('csv', () => send({ cmd: 'csv' }));
-on('json', () => send({ cmd: 'json' }));
-on('sample', () => send({ cmd: 'sample' }));
+on('csv', () => fetchAndSave('csv'));
+on('json', () => fetchAndSave('json'));
+on('sample', () => fetchAndSave('sample'));
 // Building the page takes a moment with nothing visible happening; without
 // this a second click saves a second copy.
 let savingReport = false;
@@ -146,10 +165,9 @@ on('report', async () => {
   savingReport = true;
   $('report').disabled = true;
   $('report').textContent = 'Saving…';
-  const res = await send({ cmd: 'report' });
+  await fetchAndSave('report');
   savingReport = false;
   $('report').textContent = 'Save as browsable page';
-  if (!res.ok) $('phase').textContent = res.error || 'Could not save the page.';
   refresh();
 });
 
