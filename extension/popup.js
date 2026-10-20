@@ -12,6 +12,11 @@ window.addEventListener('unhandledrejection', (e) => fail('Popup error', e.reaso
 // Bind defensively: a missing element must not throw at load and take the
 // whole popup down with it.
 const on = (id, fn) => { const el = $(id); if (el) el.onclick = fn; };
+// Which build is loaded: after replacing an unpacked copy it is otherwise hard to tell.
+try {
+  const m = chrome.runtime.getManifest();
+  $('version').textContent = `Version ${m.version_name || m.version}`;
+} catch (_) {}
 const ORDER_PATH = '/customer/order/index/';
 const RUN_NOTE = ($('runNote') || {}).innerHTML || '';
 const n = (v) => (v || 0).toLocaleString();
