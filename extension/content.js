@@ -873,6 +873,12 @@
     return '';
   };
 
+  // "br…@gmail.com": enough to tell two household accounts apart in the popup.
+  const maskAccount = (email) => {
+    const [user, domain] = String(email || '').split('@');
+    return user && domain ? `${user.slice(0, 2)}…@${domain}` : '';
+  };
+
   // Filled by the detail pass, never by the list. A refreshed row keeps them so
   // an update does not throw away dates that took minutes to fetch.
   const DETAIL_FIELDS = ['purchasedAt', 'paidAt', 'shippingFee', 'discount', 'subtotal', 'cashback',
@@ -1136,6 +1142,7 @@
           phase: state.phase,
           rows: state.rows.length,
           orders: new Set(state.rows.map((r) => r.orderId)).size,
+          account: maskAccount(accountOf(state.rows)),
           undated: undatedOrders().length,
           complete: state.complete,
           progress: state.progress,

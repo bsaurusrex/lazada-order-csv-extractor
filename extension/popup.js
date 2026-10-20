@@ -72,7 +72,7 @@ function paint(s) {
 
   if (s.rows) {
     $('count').textContent = n(s.rows);
-    $('sub').textContent = `items from ${n(s.orders)} orders`;
+    $('sub').textContent = `items from ${n(s.orders)} orders` + (s.account ? ` (${s.account})` : '');
   } else {
     $('count').textContent = s.totalPages ? n(s.totalPages) : '—';
     $('sub').textContent = s.totalPages === 1 ? 'page ready to export' : 'pages ready to export';
