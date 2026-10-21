@@ -9,7 +9,7 @@ What you get, one row per item:
 • Order status, plus line-level states such as "Refund issued"
 • Shop name and seller
 • Links back to the order and the product
-• Every other field Lazada returns, kept as extra columns
+• Other fields Lazada returns that carry data, kept as extra columns (never your email, phone or address)
 
 Optionally, a second pass adds the date each order was placed. Lazada's order list
 does not include dates, so this reads each order individually — slower, and entirely

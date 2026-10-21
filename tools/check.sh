@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.."
 fail=0
 
 echo "syntax"
-for f in extension/*.js console/*.js; do
+for f in extension/*.js console/*.js tests/*.js; do
   node --check "$f" >/dev/null 2>&1 && echo "  ok   $f" || { echo "  FAIL $f"; fail=1; }
 done
 python3 -c "import ast,sys; [ast.parse(open(f).read()) for f in sys.argv[1:]]" tools/*.py \

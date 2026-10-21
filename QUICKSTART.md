@@ -58,14 +58,16 @@ almost perfectly, because Lazada issues order ids in time order.
 
 | Column | |
 |---|---|
+| `marketplace`, `accountId` | The site, and the buyer account's own ID (never an email or name) |
 | `orderId`, `lineId` | Order, and the specific line within it |
 | `title`, `variation`, `quantity`, `price` | What you bought |
-| `status` | Delivered, Cancelled, Paid, Closed, … |
+| `status` | `paid`, `shipped`, `delivered`, `completed`, `cancelled`, … (the same words on every marketplace) |
 | `itemStatus` | Line-level state such as *Refund issued* — often more interesting than `status` |
 | `shopName`, `shopId`, `sellerId` | Who you bought from |
 | `orderDetailUrl`, `itemUrl`, `picUrl` | Links back to Lazada |
 | `purchasedAt`, `paidAt` | Only after step 3, as `2026-05-31 17:34:48` |
-| `raw.*`, `shop.*` | Every other field Lazada returned, untouched |
+| `subtotal` … `orderTotal`, `currency` | The order's money as plain numbers; `totalsCheck` says whether it adds up |
+| others | Other fields Lazada returned that carry data (nothing personal) |
 
 Open it in Excel, Numbers, or Google Sheets. It is UTF-8 with a BOM, so Thai text and ฿
 display correctly without any import fiddling.

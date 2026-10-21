@@ -84,6 +84,8 @@
     background: var(--soft); border-radius: 7px; color: var(--muted);
     font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap;
   }
+  .fromyear { display: flex; align-items: center; gap: 6px; margin: 10px 0 2px; font-size: 12px; }
+  .fromyear input { width: 84px; }
 </style>
 
 <p class="wordmark">Order History to CSV</p>
@@ -95,8 +97,15 @@
 
 <button id="run" class="primary">Export all orders to CSV</button>
 <p class="note" id="runNote">Everything you have bought: item, variation, quantity, price, status and shop.
-Takes about <strong>2 minutes</strong>. Order dates are not included — Lazada's order list simply
+Takes about <strong>2 minutes</strong>. Order dates are not included — the order list simply
 does not return them.</p>
+
+<div class="fromyear">
+  <label for="fromYear">Only orders from</label>
+  <input id="fromYear" type="number" min="1995" max="2100" step="1" placeholder="any year"
+         title="Orders placed before this year are skipped and left out of every file. Blank: all years. Applies to every marketplace.">
+  <span>on</span>
+</div>
 
 <div class="split"><span>Optional</span></div>
 
@@ -127,7 +136,12 @@ any browser, works offline, nothing to install.</p>
     <button id="full" style="flex:1" disabled title="Discard the saved export and read every page again">Start over</button>
     <button id="sample" style="flex:1" disabled>Save a detail sample</button>
   </div>
+  <div class="adv" style="margin-top:9px">
+    <button id="reset" style="flex:1" disabled title="Forget the saved export and recorded requests, e.g. before exporting another account">Reset everything</button>
+  </div>
   <div id="log"></div>
 </details>
+
+<p class="note" id="version" style="margin-top:10px;text-align:right"></p>
 
 <script src="popup.js"></script>

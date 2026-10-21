@@ -1,0 +1,12 @@
+{
+  "name": "order-history-to-csv",
+  "private": true,
+  "description": "Development tooling for the Order History to CSV extension (the extension itself has no dependencies).",
+  "scripts": {
+    "test": "node tests/run.js",
+    "check": "bash tools/check.sh"
+  },
+  "devDependencies": {
+    "jsdom": "^24.1.3"
+  }
+}

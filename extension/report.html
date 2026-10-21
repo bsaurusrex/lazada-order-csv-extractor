@@ -1,7 +1,7 @@
 <!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>My Lazada purchases</title>
+<title>My purchases</title>
 <style>
   :root{
     color-scheme: light dark;
@@ -67,7 +67,7 @@
 </style>
 
 <div class="wrap">
-  <h1>My Lazada purchases</h1>
+  <h1 id="heading">My purchases</h1>
   <p class="sub" id="sub"></p>
 
   <div class="stats">
@@ -134,7 +134,11 @@ const money = v => {
   return s.includes('-') ? -n : n;
 };
 // Six markets, six currencies: take the symbol from the data, never assume THB.
+const MARKET = META.market || 'Lazada';   // exports before 2.5.6 carry no market
+document.title = `My ${MARKET} purchases`;
+document.getElementById('heading').textContent = `My ${MARKET} purchases`;   // $ is defined further down
 const SYMBOL = (() => {
+  if (META.symbol) return META.symbol;
   for (const r of DATA) {
     const m = String(r.price || r.orderTotal || '').match(/[^\d\s.,-]+/);
     if (m) return m[0];
@@ -233,7 +237,7 @@ function render() {
       <td class="shop">${esc(r.shopName)}</td>
       <td class="when">${when}</td>
       <td class="num">${r.qty || ''}</td>
-      <td class="num">${esc(r.price)}</td>
+      <td class="num">${esc(/^-?[\d.,]+$/.test(String(r.price || '')) ? SYMBOL + r.price : r.price)}</td>
       <td><span class="tag ${cls}">${esc(r.itemStatus || r.status)}</span></td>
     </tr>`;
   }).join('');
@@ -279,8 +283,8 @@ const dated = DATA.filter(r => r.purchasedAt).length;
 $('sub').textContent = `${DATA.length.toLocaleString()} items across `
   + `${new Set(DATA.map(r => r.orderId)).size.toLocaleString()} orders`
   + (dated ? `, ${dated === DATA.length ? 'all dated' : dated.toLocaleString() + ' dated'}` : ', no dates — run the date pass to add them');
-$('foot').textContent = `Exported ${META.exported || ''} from your own Lazada account. `
-  + `This file works offline; product images load from Lazada.`;
+$('foot').textContent = `Exported ${META.exported || ''} from your own ${MARKET} account. `
+  + `This file works offline; product images load from ${MARKET}.`;
 
 render();
 </script>

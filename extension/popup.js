@@ -12,7 +12,15 @@ window.addEventListener('unhandledrejection', (e) => fail('Popup error', e.reaso
 // Bind defensively: a missing element must not throw at load and take the
 // whole popup down with it.
 const on = (id, fn) => { const el = $(id); if (el) el.onclick = fn; };
-const ORDER_PATH = '/customer/order/index/';
+// Which build is loaded: after replacing an unpacked copy it is otherwise hard to tell.
+try {
+  const m = chrome.runtime.getManifest();
+  $('version').textContent = `Version ${m.version_name || m.version}`;
+} catch (_) {}
+// Order list page per marketplace.
+const ORDER_PATHS = { lazada: '/customer/order/index/', shopee: '/user/purchase/', aliexpress: '/p/order/index.html', amazon: '/your-orders/orders' };
+const marketOfUrl = (u) => (/shopee\./i.test(u || '') ? 'shopee' : /aliexpress\./i.test(u || '') ? 'aliexpress'
+  : /\/\/(www\.)?amazon\.(sg|com)\//i.test(u || '') ? 'amazon' : /lazada\./i.test(u || '') ? 'lazada' : '');
 const RUN_NOTE = ($('runNote') || {}).innerHTML || '';
 const n = (v) => (v || 0).toLocaleString();
 
@@ -67,7 +75,8 @@ function paint(s) {
 
   if (s.rows) {
     $('count').textContent = n(s.rows);
-    $('sub').textContent = `items from ${n(s.orders)} orders`;
+    $('sub').textContent = `items from ${n(s.orders)} orders` + (s.account ? ` (${s.account})` : '')
+      + (s.leftOut ? ` · ${n(s.leftOut)} before ${s.fromYear} left out` : '');
   } else {
     $('count').textContent = s.totalPages ? n(s.totalPages) : '—';
     $('sub').textContent = s.totalPages === 1 ? 'page ready to export' : 'pages ready to export';
@@ -80,7 +89,7 @@ function paint(s) {
       ? `Reading order ${n(p.done)} of ${n(p.total)}`
       : s.phase === 'update'
         ? `Checking page ${n(p.done)} for new orders`
-        : `Page ${n(p.done)} of ${n(p.total)}`;
+        : p.total ? `Page ${n(p.done)} of ${n(p.total)}` : `Page ${n(p.done)}`;
   } else {
     $('phase').textContent = s.done ? (p.message || 'Finished') : '';
   }
@@ -105,6 +114,7 @@ function paint(s) {
   $('csv').disabled = !s.rows || s.running;
   $('json').disabled = !s.rows || s.running;
   $('sample').disabled = s.running || !s.captures;
+  $('reset').disabled = s.running;
   $('report').disabled = !s.rows || s.running || savingReport;
 
   // Only undated orders are read, so after an update this is a short pass.
@@ -147,6 +157,23 @@ const runWith = async (full) => {
   } });
   refresh();
 };
+// "Only orders from year X": one setting for every marketplace, kept in
+// extension storage; the page reads it from there.
+(() => {
+  const box = $('fromYear');
+  if (!box) return;
+  const KEY = 'lzx_from_year';
+  try { chrome.storage.local.get(KEY, (o) => { const v = o && o[KEY]; if (v) box.value = v; }); } catch (_) {}
+  box.onchange = () => {
+    const y = Number(box.value);
+    const ok = Number.isInteger(y) && y >= 1995 && y <= 2100;
+    if (box.value && !ok) { box.value = ''; }
+    try {
+      if (ok) chrome.storage.local.set({ [KEY]: y }, refresh);
+      else chrome.storage.local.remove(KEY, refresh);
+    } catch (_) {}
+  };
+})();
 // Stopped runs keep what they read and still save a CSV.
 on('run', () => (running ? send({ cmd: 'cancel' }).then(refresh) : runWith(false)));
 on('full', () => runWith(true));
@@ -157,6 +184,21 @@ on('dates', async () => {
 on('csv', () => fetchAndSave('csv'));
 on('json', () => fetchAndSave('json'));
 on('sample', () => fetchAndSave('sample'));
+// Two clicks, so a stray one can't throw away an export that took minutes.
+let resetArmed = null;
+on('reset', async () => {
+  if (!resetArmed) {
+    $('reset').textContent = 'Click again to forget everything';
+    resetArmed = setTimeout(() => { resetArmed = null; $('reset').textContent = 'Reset everything'; }, 4000);
+    return;
+  }
+  clearTimeout(resetArmed); resetArmed = null;
+  $('reset').textContent = 'Reset everything';
+  const res = await send({ cmd: 'reset' });
+  if (!res.ok) $('phase').textContent = res.error || 'Could not reset.';
+  refresh();
+});
+
 // Building the page takes a moment with nothing visible happening; without
 // this a second click saves a second copy.
 let savingReport = false;
@@ -181,20 +223,22 @@ if (more) more.addEventListener('toggle', () => {
 (async () => {
   try {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab || !/lazada\./i.test(tab.url || '')) {
-    $('sub').textContent = 'Open Lazada to begin';
+  const market = tab && marketOfUrl(tab.url);
+  if (!tab || !market) {
+    $('sub').textContent = 'Open Lazada, Shopee, AliExpress or Amazon to begin';
     $('phase').textContent = 'Sign in, then go to My Orders.';
     $('run').disabled = true;
     return;
   }
   tabId = tab.id;
 
-  if (!/order/i.test(new URL(tab.url).pathname)) {
+  // Lazada: /customer/order/…  Shopee: /user/purchase/…
+  if (!/order|purchase/i.test(new URL(tab.url).pathname)) {
     $('sub').textContent = 'This is not your order list';
     $('phase').textContent = '';
     $('run').textContent = 'Go to My Orders';
     $('run').onclick = async () => {
-      await chrome.tabs.update(tabId, { url: new URL(ORDER_PATH, tab.url).toString() });
+      await chrome.tabs.update(tabId, { url: new URL(ORDER_PATHS[market], tab.url).toString() });
       window.close();
     };
     return;

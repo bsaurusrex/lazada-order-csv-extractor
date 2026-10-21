@@ -1,9 +1,11 @@
 # Your exported order history — personal data. Never commit this.
 output/
 tmp/
+debug/
 *.csv
 *.json
 !extension/manifest.json
+!package.json
 *.zip
 
 .DS_Store

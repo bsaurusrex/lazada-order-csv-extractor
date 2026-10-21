@@ -1,8 +1,9 @@
 {
   "manifest_version": 3,
   "name": "Order History to CSV",
-  "version": "2.4.1",
-  "description": "Export your order history to CSV \u2014 every item, price, status and shop, with optional purchase dates. Works with Lazada.",
+  "version": "2.9.0",
+  "version_name": "2.9.0 dev from year",
+  "description": "Export your order history to CSV \u2014 every item, price, status and shop, with optional purchase dates. Works with Lazada, Shopee, AliExpress and Amazon (SG, US).",
   "action": {
     "default_popup": "popup.html",
     "default_title": "Order History to CSV",
@@ -24,7 +25,19 @@
     "*://*.lazada.com.my/*",
     "*://*.lazada.co.id/*",
     "*://*.lazada.com.ph/*",
-    "*://*.lazada.vn/*"
+    "*://*.lazada.vn/*",
+    "*://*.shopee.sg/*",
+    "*://*.shopee.com.my/*",
+    "*://*.shopee.ph/*",
+    "*://*.shopee.co.th/*",
+    "*://*.shopee.co.id/*",
+    "*://*.shopee.vn/*",
+    "*://*.shopee.tw/*",
+    "*://*.shopee.com.br/*",
+    "*://*.aliexpress.com/*",
+    "*://*.aliexpress.us/*",
+    "*://*.amazon.sg/*",
+    "*://*.amazon.com/*"
   ],
   "content_scripts": [
     {
@@ -34,7 +47,19 @@
         "*://*.lazada.com.my/*",
         "*://*.lazada.co.id/*",
         "*://*.lazada.com.ph/*",
-        "*://*.lazada.vn/*"
+        "*://*.lazada.vn/*",
+        "*://*.shopee.sg/*",
+        "*://*.shopee.com.my/*",
+        "*://*.shopee.ph/*",
+        "*://*.shopee.co.th/*",
+        "*://*.shopee.co.id/*",
+        "*://*.shopee.vn/*",
+        "*://*.shopee.tw/*",
+        "*://*.shopee.com.br/*",
+        "*://*.aliexpress.com/*",
+        "*://*.aliexpress.us/*",
+        "*://*.amazon.sg/*",
+        "*://*.amazon.com/*"
       ],
       "js": [
         "interceptor.js"
@@ -50,7 +75,19 @@
         "*://*.lazada.com.my/*",
         "*://*.lazada.co.id/*",
         "*://*.lazada.com.ph/*",
-        "*://*.lazada.vn/*"
+        "*://*.lazada.vn/*",
+        "*://*.shopee.sg/*",
+        "*://*.shopee.com.my/*",
+        "*://*.shopee.ph/*",
+        "*://*.shopee.co.th/*",
+        "*://*.shopee.co.id/*",
+        "*://*.shopee.vn/*",
+        "*://*.shopee.tw/*",
+        "*://*.shopee.com.br/*",
+        "*://*.aliexpress.com/*",
+        "*://*.aliexpress.us/*",
+        "*://*.amazon.sg/*",
+        "*://*.amazon.com/*"
       ],
       "js": [
         "content.js"
@@ -77,7 +114,19 @@
         "*://*.lazada.com.my/*",
         "*://*.lazada.co.id/*",
         "*://*.lazada.com.ph/*",
-        "*://*.lazada.vn/*"
+        "*://*.lazada.vn/*",
+        "*://*.shopee.sg/*",
+        "*://*.shopee.com.my/*",
+        "*://*.shopee.ph/*",
+        "*://*.shopee.co.th/*",
+        "*://*.shopee.co.id/*",
+        "*://*.shopee.vn/*",
+        "*://*.shopee.tw/*",
+        "*://*.shopee.com.br/*",
+        "*://*.aliexpress.com/*",
+        "*://*.aliexpress.us/*",
+        "*://*.amazon.sg/*",
+        "*://*.amazon.com/*"
       ]
     }
   ]

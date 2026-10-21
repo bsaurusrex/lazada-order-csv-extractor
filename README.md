@@ -56,11 +56,26 @@ Without it, sort by `orderId` ascending — it is a near-perfect chronological p
 To run your working copy instead of the store build:
 
 1. `chrome://extensions` → **Developer mode** → **Load unpacked** → pick `extension/`.
-2. After editing, click the reload arrow on the extension's card, then reload the Lazada tab.
-3. Before a release, run `tools/check.sh`: syntax, popup ids against the HTML, manifest files.
+2. After editing, click the reload arrow on the extension's card, then **reload every
+   marketplace tab** (Lazada, Shopee, AliExpress, Amazon). A tab opened before the reload
+   keeps running the previous build's page script (`interceptor.js`) until it is reloaded,
+   and errors it raises are still reported against the old line numbers.
+3. Run the tests: `npm install` once, then `npm test`. Each test loads `extension/` into a
+   simulated page with recorded API responses, so no browser or account is needed.
+   `npm test -- amazon` runs only the tests whose file name contains "amazon".
+4. Before a release, run `tools/check.sh`: syntax, popup ids against the HTML, manifest files.
 
 An unpacked copy gets its own extension id, so it does not see exports saved by the store
 build. Disable one of the two while testing, or both will attach to the same page.
+
+### Tests and real data
+
+Test fixtures are synthetic: order ids like `100000000000101`, order numbers like
+`240501EXAMPLE3`, `example.com` addresses, and "account 1" / "account 2" for people. Shapes
+can follow a real response, but never copy real order ids, order numbers, tracking numbers,
+names, addresses, emails, shop names or product titles into a test, the changelog or a
+commit. Your own exports (`*.csv`, `*.json`) are ignored by git; keep debugging dumps in
+`debug/`, which is ignored too.
 
 ## Console alternative
 
@@ -148,23 +163,36 @@ re-scraping — the right value is already in the `shop.status` passthrough colu
 
 It rewrites `status`, adds `itemStatus`, and drops always-empty columns.
 
+## Only orders from a chosen year
+
+The year box under the export button skips orders placed before that year, on every
+marketplace, and leaves them out of every file. Blank means all years. Orders already saved
+are kept, so lowering the year brings them back without reading them again.
+
 ## Columns
 
 One row per order **item**. An order with three products is three rows sharing an `orderId`.
+Every marketplace (Lazada, Shopee, AliExpress, Amazon) exports the same core columns, in the
+same order and with the same meaning; a column a marketplace cannot fill is left blank.
 
 | Column | |
 |---|---|
-| `orderId`, `lineId` | Order, and the specific line within it |
-| `purchasedAt`, `paidAt` | Detail pass only. `YYYY-MM-DD HH:MM:SS` in Lazada's local time, so they sort. `tools/fix-dates.py` still converts exports made before 2.4.1 |
-| `title`, `variation`, `quantity`, `price` | The item, and its **list price** |
-| `status` | Delivered, Cancelled, Paid, Closed, … |
-| `itemStatus`, `refunded` | Line-level state (*Refund issued*, *Refund completed*) and a yes/blank flag |
-| `orderTotal` | Detail pass only. What was actually **charged** |
-| `subtotal`, `shippingFee`, `discount`, `refundAmount` | The checkout breakdown behind that total |
+| `marketplace` | The site the order came from: `lazada.sg`, `shopee.sg`, `aliexpress.com`, `amazon.com`, … |
+| `accountId` | The marketplace's own ID for the signed-in buyer (numeric; Amazon's customer ID). Never an email, name or phone |
+| `orderId`, `orderSn`, `lineId` | Order, the order number shown to the buyer where it differs (Shopee), and the line within the order |
+| `purchasedAt` … `cancelledAt` | `YYYY-MM-DD HH:MM:SS` in the site's local time (`YYYY-MM-DD` where the site shows no time). Blank when unknown |
+| `status`, `statusDetail` | `pending`, `paid`, `processing`, `shipped`, `delivered`, `completed`, `cancelled` or `refunded`; the site's own wording in `statusDetail` when it says more |
+| `title`, `variation`, `itemId`, `skuId`, `quantity` | The item |
+| `price`, `lineTotal` | Unit **list price** and `price × quantity`, as plain numbers (a free gift is `0.00`) |
+| `currency`, `itemCurrency` | ISO code of the order's money columns; `itemCurrency` only when item prices are in another currency |
+| `subtotal`, `shippingFee`, `tax`, `otherFees`, `discount`, `giftCardAmount`, `orderTotal` | The order's money, repeated on each of its rows: subtotal + shippingFee + tax + otherFees − discount − giftCardAmount = orderTotal (what was charged) |
+| `amountPaid`, `paymentCurrency`, `exchangeRate` | What reached the card, when the site states it separately |
+| `cashback`, `refundAmount` | Cashback earned, and refunds listed in the breakdown |
+| `totalsCheck` | `ok` when the line above adds up to the cent, `mismatch` when it does not, blank for cancelled orders or when a figure is missing |
+| `paymentMethod`, `shopName`, `sellerId`, `carrier`, `trackingNumber` | |
+| `orderDetailUrl`, `itemUrl`, `picUrl` | Links back to the site |
 | `charges` | Every breakdown line verbatim, `Label=Value` separated by `\|` |
-| `shopName`, `shopId`, `sellerId` | Who you bought from |
-| `orderDetailUrl`, `itemUrl`, `picUrl` | Links back to Lazada |
-| `raw.*`, `shop.*` | Every other field Lazada returned |
+| others | Fields the marketplace returned that carry data. Page-styling flags, constant or repeated copies, and anything personal (email, phone, address, names) are not exported |
 
 ### Item prices are not what you paid
 
@@ -173,6 +201,8 @@ vouchers deducted at checkout. On a real account the gap was a median of ฿50 a
 as ฿288 per order, and **summed line prices matched the charged total on none of them**.
 
 For anything money-related, use `orderTotal` and the breakdown columns, not `sum(price)`.
+On Lazada, `subtotal` is the items at list price and `discount` everything taken off between
+that and the charged total (Lazada's own breakdown sometimes omits a discount or counts one twice).
 Those come from the detail pass; without it you have list prices only.
 
 ### Refunds
