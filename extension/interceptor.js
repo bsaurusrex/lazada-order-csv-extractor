@@ -1,6 +1,7 @@
 // MAIN world, document_start (also injected on demand by the popup).
-// Records the order-list request (Lazada or Shopee) so it can be replayed page by page.
-// Everything stays in this tab.
+// Records order requests on Lazada, Shopee and AliExpress so they can be replayed
+// page by page, and bridges the page's signed fetch (Shopee) and mtop (AliExpress)
+// calls. Leaves Amazon alone: it is read from its order pages. Everything stays in this tab.
 (() => {
   // Frames: only the hidden order frame the dates pass loads (see content.js).
   if (window !== window.top && window.name !== 'lzx-prime') return;

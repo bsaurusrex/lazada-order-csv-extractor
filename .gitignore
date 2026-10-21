@@ -1,16 +1,19 @@
-# Your exported order history — personal data. Never commit this.
-output/
-tmp/
+# Personal data: never commit it.
+#   debug/   exports and dumps while developing (e.g. debug/v2.8_exports/)
+#   output/  where the tools/ repair scripts read and write exports
+# The pattern rules catch an export saved anywhere else in the repo.
 debug/
+output/
 *.csv
 *.json
 !extension/manifest.json
 !package.json
-*.zip
-
-.DS_Store
-node_modules/
 
 # Store screenshots show real orders. Kept locally, never published.
 store/screenshot-*.png
+
+# Builds and tooling
+*.zip
+node_modules/
+.DS_Store
 .serena/

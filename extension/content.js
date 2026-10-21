@@ -481,8 +481,8 @@
         items.forEach((it, idx) => {
           const qty = it.amount ?? it.quantity ?? it.qty ?? '';
           // item_price: listed unit price. order_price: unit price actually paid
-          // (after item-level discounts) — verified: sum(order_price × amount)
-          // equals info_card.subtotal when there is no shop voucher.
+          // (after item-level discounts); sum(order_price × amount) equals
+          // info_card.subtotal when there is no shop voucher.
           const unit = shopeeMoney(it.item_price ?? it.price ?? it.order_price ?? '');
           const paid = shopeeMoney(it.order_price ?? '');
           const lineId = String(it.order_item_id ?? `${it.item_id ?? ''}-${it.model_id ?? ''}-${idx}`);
@@ -584,7 +584,7 @@
     const pi = isObj(d.processing_info) ? d.processing_info : {};
     out.orderSn = String(pi.order_sn || pc.order_sn || '').trim();
     // pc_ layout (what the extension gets: the desktop page sends x-api-source: pc).
-    // Verified Oct 2026 against the same order in both layouts:
+    // Compared on the same order in both layouts:
     //   delivery_time         = shipped out (== label_odp_ship_time), NOT delivered
     //   shipping_confirm_time = seller arranged shipment (seconds after payment): ignored
     //   actual delivery       = the "Delivered" event in the tracking history
@@ -1240,10 +1240,9 @@
 
   // Shopee's class names are hashed CSS modules ("OrderShopSection__abc12"),
   // so match on the stable prefix with [class*=…].
-  // Verified Oct 2026: shopee.sg now ships fully hashed class names
-  // ("R5DdXs", "LNTevg"), so the descriptive selectors below find nothing.
-  // They are tried first in case a market or A/B build still uses them; the
-  // structural reader after them is what works on the live site.
+  // shopee.sg now ships fully hashed names ("R5DdXs"), so these selectors find
+  // nothing there; they are tried first for markets that still use them, and
+  // the structural reader after them is what works on the live site.
   const SHOPEE_ORDER_LINK = 'a[href*="/user/purchase/order/"]';
   const shopeeOrderIdOf = (a) => ((a.getAttribute('href') || '').match(/\/order\/(\d+)/) || [])[1] || '';
   const orderIdsIn = (el) => new Set(Array.from(el.querySelectorAll(SHOPEE_ORDER_LINK)).map(shopeeOrderIdOf).filter(Boolean));
@@ -1498,7 +1497,7 @@
       // Lazada's order-level "Order Summary" (totalSummary_<order>.fields):
       // { fees: [{ key: "Subtotal", value: "$51.04" }, { key: "Shipping Fee", … }], total: "$57.97" }.
       // Unlike the package blocks it covers every package of the order, so its
-      // shipping fee and total are the order's own (verified Oct 2026).
+      // shipping fee and total are the order's own.
       if (!IS_SHOPEE && !out.summary && Array.isArray(n.fees) && MONEYISH.test(String(n.total == null ? '' : n.total))) {
         const fees = n.fees.filter((x) => isObj(x) && typeof x.key === 'string' && MONEYISH.test(String(x.value == null ? '' : x.value)))
           .map((x) => [x.key.trim(), String(x.value).trim()]);
@@ -1510,7 +1509,7 @@
       if (!out.orderTotal && typeof n.totalKey === 'string' && MONEYISH.test(String(n.total == null ? '' : n.total))) {
         out.orderTotal = String(n.total).trim();
       }
-      // Shopee get_order_detail (verified Oct 2026): dates are rows of
+      // Shopee get_order_detail: dates are rows of
       // { info_label: { text: "label_odp_order_time" }, info_value: { value: "1700000000" } }.
       if (isObj(n.info_label) && isObj(n.info_value) && typeof n.info_label.text === 'string') {
         const m = n.info_label.text.match(/odp_(order|payment)_time/i);
@@ -1655,16 +1654,9 @@
 
   // Orders the detail pass has not dated yet. An update only adds a handful,
   // so re-reading every order would waste ten minutes on known answers.
-  // Bumped when the detail pass learns to read more, so orders read by an older
-  // version are offered again (2: amounts and payment method on Lazada SG;
-  // 3: the order total from the summary block).
-  // Shopee 4: price breakdown (subtotal, shipping, vouchers) from payment_info.
-  // Shopee 5: merchandise subtotal no longer shadowed by the list's subtotal.
-  // Shopee 6: order number (orderSn) from the detail response.
-  // Shopee 7: shipping timeline, carrier, tracking, amount paid, coins, cancel reason.
-  // Shopee 8: shippedAt/deliveredAt from the right pc_ fields; coins unscaled.
-  // Shopee 9: re-read so stale deliveredAt values from 7/8 are cleared.
-  // Lazada 4: shipping fee and total from the order-level summary (every package).
+  // Bump a marketplace's version when its detail pass learns to read more:
+  // orders read by any other version are offered again. CHANGELOG.md says what
+  // each version added.
   const DETAILS_VERSION = IS_SHOPEE ? '9' : IS_ALIEXPRESS ? 'ae1' : IS_AMAZON ? 'amz1' : '4';
 
   function undatedOrders() {
@@ -1675,8 +1667,7 @@
       if (!id) continue;
       // Left out of every file anyway: not worth a request.
       if (beforeCutoff(r)) { dated.add(id); continue; }
-      // Older versions are read again: Lazada 2 and 3 missed the shipping of
-      // every package but the first.
+      // Read by another version: read again.
       if (r.purchasedAt && r.detailsVersion === DETAILS_VERSION) dated.add(id);
       if (!all.includes(id)) all.push(id);
     }
@@ -2029,12 +2020,10 @@
       return '';
     };
 
-    // Pull the charged total and its components out of the breakdown.
-    // Classification verified against 2,721 real breakdown lines. The naive
-    // keyword match was wrong in three ways: "Shipping Fee Voucher" and
-    // "Standard Delivery" both matched the shipping pattern and could win over
-    // the actual fee; discounts are spread across seven labels and only the
-    // first was kept; and "Cashback earned" was read as a refund.
+    // Pull the charged total and its components out of the breakdown. Order
+    // matters: "Shipping Fee Voucher" is a discount, not a fee; "Standard
+    // Delivery" heads a package and carries its total; "Cashback earned" is
+    // not a refund; and every discount label is summed, not just the first.
     const kindOf = (label) => {
       const l = label.trim().toLowerCase();
       if (/^total\b/.test(l)) return 'total';
@@ -2135,7 +2124,8 @@
   //               (the page calls it itself; SPC_U session cookie as fallback)
   //   AliExpress: cookie aep_usuc_f -> x_alimid (only that field is read; the
   //               neighbouring xman_* cookies carry name and email and are not)
-  //   Lazada:     a numeric buyer id field on the order list, if present
+  //   Amazon:     the customer ID ("A…") from the page config; it has no numeric id
+  //   Lazada:     the lzd_uid cookie, only for orders whose number ends in its digits
   const ACCOUNT_KEY = `lzx_account_${STORE_TAG}`;
   let currentAccount = '';
   const NUMERIC_ID = /^\d{3,20}$/;
@@ -2518,15 +2508,11 @@
   const coversCutoff = () => !state.coveredFrom || (FROM_YEAR && FROM_YEAR >= state.coveredFrom);
 
   // ------------------------------------------------------------------ output
-  // Every marketplace exports the same core columns, in the same order, with the
-  // same meaning. Normalizing happens here, on the way out: the saved rows stay
-  // as they were read, so merging and re-reading are unaffected.
-  //   money     plain numbers (2 decimals; 0 for IDR/VND/JPY/KRW), never "$" or "FREE"
-  //   dates     "YYYY-MM-DD HH:MM:SS" in the site's time, or "YYYY-MM-DD" when the site
-  //             gives no time (Amazon); placeholder dates (1970) are blank
-  //   status    one shared vocabulary (STATUS_WORDS); the site's own words in statusDetail
-  //   totals    subtotal + shippingFee + tax + otherFees - discount - giftCardAmount
-  //             = orderTotal, checked per order in totalsCheck
+  // One column layout for every marketplace (README "Columns"). Normalizing
+  // happens here, on the way out: saved rows stay as they were read, so
+  // merging and re-reading are unaffected. Each order should satisfy
+  //   subtotal + shippingFee + tax + otherFees - discount - giftCardAmount = orderTotal
+  // and totalsCheck says whether it does.
   const CORE_COLUMNS = ['marketplace', 'accountId', 'orderId', 'orderSn', 'lineId',
     'purchasedAt', 'paidAt', 'shippedAt', 'deliveredAt', 'completedAt', 'cancelledAt',
     'status', 'statusDetail', 'title', 'variation', 'itemId', 'skuId', 'quantity', 'price', 'lineTotal',
@@ -2619,7 +2605,7 @@
   }
 
   // AliExpress: every negative breakdown line is a discount, whatever it is
-  // called ("Spend & save" was missed before 2.8.2). And AliExpress lists a
+  // called ("Spend & save", "Store Coupon", …). And AliExpress lists a
   // shipping line it neither shows the buyer nor charges (marked hidden, e.g.
   // S$0.02 with a total of subtotal + tax): when the shipping fee is exactly
   // what stops the order adding up, it was not charged.
