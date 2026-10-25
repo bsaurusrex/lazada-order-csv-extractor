@@ -3,7 +3,7 @@
 Every release of Order History to CSV (named Lazada Order CSV Extractor up to 2.2.2).
 Newest first.
 
-## Unreleased
+## 2.5.0 — 2026-10-25
 
 **Added**
 - A **schema.org format** checkbox under the save buttons. Ticked, **Save schema.org JSON**
