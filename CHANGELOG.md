@@ -3,6 +3,14 @@
 Every release of Order History to CSV (named Lazada Order CSV Extractor up to 2.2.2).
 Newest first.
 
+## Unreleased
+
+**Added**
+- A **schema.org format** checkbox under the save buttons. Ticked, **Save schema.org JSON**
+  saves the export as schema.org `Order`s (JSON-LD, `.jsonld`), one per order with its items,
+  prices, currency, shop and status, so other apps can read it without knowing the CSV's
+  columns. The choice is remembered.
+
 ## 2.4.1 — 2026-09-25
 
 **Fixed**

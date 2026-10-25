@@ -1070,9 +1070,95 @@
     log(`Saved a browsable page with ${slim.length} items.`);
   }
 
+  // Each Lazada site charges in one currency, so the host names it.
+  const CURRENCY = { sg: 'SGD', th: 'THB', my: 'MYR', id: 'IDR', ph: 'PHP', vn: 'VND' };
+  const siteCurrency = () => {
+    const m = location.hostname.match(/lazada\.(?:co\.|com\.)?([a-z]{2})$/);
+    return (m && CURRENCY[m[1]]) || '';
+  };
+
+  // schema.org's OrderStatus values, read from Lazada's own words. Anything
+  // else is left out rather than guessed.
+  function orderStatusOf(text) {
+    const s = String(text || '');
+    if (/cancel/i.test(s)) return 'https://schema.org/OrderCancelled';
+    if (/return|refund/i.test(s)) return 'https://schema.org/OrderReturned';
+    if (/deliver|complete|received/i.test(s)) return 'https://schema.org/OrderDelivered';
+    if (/ship|transit|to receive/i.test(s)) return 'https://schema.org/OrderInTransit';
+    if (/pack|process|confirm/i.test(s)) return 'https://schema.org/OrderProcessing';
+    if (/pay/i.test(s)) return 'https://schema.org/OrderPaymentDue';
+    return undefined;
+  }
+
+  // The export as schema.org Orders (JSON-LD), one per Lazada order, so other
+  // tools can read it without knowing this extension's columns. Each line is an
+  // OrderItem for the product, quantity and status, and an Offer for its price.
+  // Dates are the site's local time, as Lazada shows them.
+  function toSchemaOrg(rows) {
+    const currency = siteCurrency();
+    const amount = (v) => (v === '' || v == null ? undefined : parseMoney(v));
+    const link = (v) => { try { return new URL(v, location.origin).toString(); } catch (_) { return undefined; } };
+    const orders = new Map();
+    for (const r of rows) {
+      const id = String(r.orderId || '');
+      if (!id || !r.title) continue;
+      let o = orders.get(id);
+      if (!o) {
+        const total = amount(r.orderTotal);
+        const status = orderStatusOf(r.status);
+        o = {
+          '@type': 'Order',
+          orderNumber: id,
+          ...(r.purchasedAt && { orderDate: String(r.purchasedAt).replace(' ', 'T') }),
+          ...(status && { orderStatus: status }),
+          broker: { '@type': 'Organization', name: 'Lazada', url: location.origin },
+          ...(r.shopName && { seller: { '@type': 'Organization', name: r.shopName,
+            ...(r.shopId && { identifier: String(r.shopId) }) } }),
+          ...(r.paymentMethod && { paymentMethod: r.paymentMethod }),
+          ...(total !== undefined && { partOfInvoice: { '@type': 'Invoice', totalPaymentDue: {
+            '@type': 'PriceSpecification', price: total, ...(currency && { priceCurrency: currency }) } } }),
+          ...(r.orderDetailUrl && link(r.orderDetailUrl) && { url: link(r.orderDetailUrl) }),
+          orderedItem: [],
+          acceptedOffer: [],
+        };
+        orders.set(id, o);
+      }
+      const quantity = Number(r.quantity) || 1;
+      const itemStatus = orderStatusOf(r.itemStatus);
+      const product = {
+        '@type': 'Product',
+        name: r.title,
+        ...(r.variation && { description: r.variation }),
+        ...(r.skuId && { sku: String(r.skuId) }),
+        ...(r.brand && { brand: { '@type': 'Brand', name: r.brand } }),
+        ...(r.itemUrl && link(r.itemUrl) && { url: link(r.itemUrl) }),
+        ...(r.picUrl && link(r.picUrl) && { image: link(r.picUrl) }),
+      };
+      o.orderedItem.push({
+        '@type': 'OrderItem',
+        ...(r.lineId && { orderItemNumber: String(r.lineId) }),
+        orderQuantity: quantity,
+        ...(itemStatus && { orderItemStatus: itemStatus }),
+        orderedItem: product,
+      });
+      const price = amount(r.price);
+      if (price !== undefined) {
+        o.acceptedOffer.push({
+          '@type': 'Offer',
+          itemOffered: product,
+          price,
+          ...(currency && { priceCurrency: currency }),
+          eligibleQuantity: { '@type': 'QuantitativeValue', value: quantity },
+        });
+      }
+    }
+    return JSON.stringify({ '@context': 'https://schema.org', '@graph': [...orders.values()] }, null, 2);
+  }
+
   const stamp = () => new Date().toISOString().slice(0, 10);
   const downloadCsv = () => download(`lazada-orders-${stamp()}.csv`, toCsv(state.rows), 'text/csv');
   const downloadJson = () => download(`lazada-orders-${stamp()}.json`, JSON.stringify(state.raw.length ? state.raw : state.rows, null, 2), 'application/json');
+  const downloadSchemaOrg = () => download(`lazada-orders-${stamp()}.jsonld`, toSchemaOrg(state.rows), 'application/ld+json');
 
   // --------------------------------------------------------------- messaging
   // The hidden frame only records; the popup talks to the top frame alone.
@@ -1126,7 +1212,7 @@
       } else if (msg.cmd === 'csv') {
         downloadCsv(); respond({ ok: true, rows: state.rows.length });
       } else if (msg.cmd === 'json') {
-        downloadJson(); respond({ ok: true, rows: state.rows.length });
+        (msg.schemaOrg ? downloadSchemaOrg : downloadJson)(); respond({ ok: true, rows: state.rows.length });
       } else if (msg.cmd === 'report') {
         buildReport().then(() => respond({ ok: true })).catch((e) => respond({ ok: false, error: e.message }));
         return true;

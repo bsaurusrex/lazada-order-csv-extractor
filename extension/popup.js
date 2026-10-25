@@ -136,7 +136,14 @@ on('dates', async () => {
   refresh();
 });
 on('csv', () => send({ cmd: 'csv' }));
-on('json', () => send({ cmd: 'json' }));
+on('json', () => send({ cmd: 'json', schemaOrg: $('schemaOrg').checked }));
+// The JSON button saves raw rows, or schema.org Orders when ticked; the choice is kept.
+const jsonLabel = () => { $('json').textContent = $('schemaOrg').checked ? 'Save schema.org JSON' : 'Save raw JSON'; };
+$('schemaOrg').onchange = () => {
+  jsonLabel();
+  try { chrome.storage.local.set({ schemaOrg: $('schemaOrg').checked }); } catch (_) {}
+};
+try { chrome.storage.local.get('schemaOrg', (o) => { $('schemaOrg').checked = !!(o && o.schemaOrg); jsonLabel(); }); } catch (_) {}
 on('sample', () => send({ cmd: 'sample' }));
 // Building the page takes a moment with nothing visible happening; without
 // this a second click saves a second copy.
