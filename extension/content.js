@@ -2784,6 +2784,15 @@
   const stamp = () => new Date().toISOString().slice(0, 10);
   const csvFile = () => ({ name: `${MARKET}-orders-${stamp()}.csv`, text: toCsv(exportRows()), mime: 'text/csv' });
   const jsonFile = () => ({ name: `${MARKET}-orders-${stamp()}.json`, text: JSON.stringify(scrubPersonal(state.raw.length && !FROM_YEAR ? state.raw : exportRows()), null, 2), mime: 'application/json' });
+  // The same rows and columns as the CSV, as schema.org Orders (schema-org.js).
+  const schemaOrgFile = () => {
+    const raw = exportRows();
+    const rows = normalizeRows(raw);
+    const cols = exportColumns(rows, raw);
+    const slim = rows.map((r) => Object.fromEntries(cols.filter((k) => r[k] !== undefined).map((k) => [k, r[k]])));
+    const doc = window.__LZX_SCHEMA_ORG__.toSchemaOrg(slim);
+    return { name: `${MARKET}-orders-${stamp()}.jsonld`, text: JSON.stringify(doc, null, 2), mime: 'application/ld+json' };
+  };
   const downloadCsv = () => download(csvFile());
 
   // --------------------------------------------------------------- messaging
@@ -2859,7 +2868,7 @@
       } else if (msg.cmd === 'csv') {
         respond({ ok: true, rows: state.rows.length, file: csvFile() });
       } else if (msg.cmd === 'json') {
-        respond({ ok: true, rows: state.rows.length, file: jsonFile() });
+        respond({ ok: true, rows: state.rows.length, file: msg.schemaOrg ? schemaOrgFile() : jsonFile() });
       } else if (msg.cmd === 'report') {
         buildReport().then((file) => respond({ ok: true, file })).catch((e) => respond({ ok: false, error: e.message }));
         return true;

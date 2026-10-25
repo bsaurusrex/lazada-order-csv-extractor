@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Order History to CSV",
-  "version": "2.9.0",
-  "version_name": "2.9.0 dev from year",
+  "version": "2.10.0",
+  "version_name": "2.10.0 dev schema.org",
   "description": "Export your order history to CSV \u2014 every item, price, status and shop, with optional purchase dates. Works with Lazada, Shopee, AliExpress and Amazon (SG, US).",
   "action": {
     "default_popup": "popup.html",
@@ -90,6 +90,7 @@
         "*://*.amazon.com/*"
       ],
       "js": [
+        "schema-org.js",
         "content.js"
       ],
       "run_at": "document_start",

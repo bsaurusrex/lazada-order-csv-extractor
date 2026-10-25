@@ -3,6 +3,15 @@
 Every release of Order History to CSV (named Lazada Order CSV Extractor up to 2.2.2).
 Newest first.
 
+## 2.10.0 — 2026-10-25
+
+**Added**
+- A **schema.org format** checkbox under the save buttons. Ticked, **Save schema.org JSON** saves the export as
+  schema.org `Order`s (JSON-LD, `.jsonld`) for every marketplace: one Order per order with its items, prices,
+  currency, shop, marketplace and status. Every CSV column is also kept under the `ohc:` prefix, so a reader can
+  rebuild the CSV's rows exactly. The choice is remembered.
+- `tools/csv-to-jsonld.js` converts exports already saved as CSV (2.8.0 on), checking each gives the same rows back.
+
 ## Development — 2026-10-21
 
 - Tests in `tests/` (`npm install`, then `npm test`): 18 end-to-end tests that run

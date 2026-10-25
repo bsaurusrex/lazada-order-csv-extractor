@@ -48,8 +48,8 @@ function saveFile(file) {
 }
 
 // Ask the page for a file and save it, or say why not.
-async function fetchAndSave(cmd) {
-  const res = await send({ cmd });
+async function fetchAndSave(cmd, extra) {
+  const res = await send({ cmd, ...extra });
   if (res.ok && res.file) saveFile(res.file);
   else $('phase').textContent = res.error || 'Could not save the file.';
   return res;
@@ -61,7 +61,7 @@ async function ensureInjected() {
   if ((await send({ cmd: 'ping' })).ok) return true;
   try {
     await chrome.scripting.executeScript({ target: { tabId }, files: ['interceptor.js'], world: 'MAIN' });
-    await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'], world: 'ISOLATED' });
+    await chrome.scripting.executeScript({ target: { tabId }, files: ['schema-org.js', 'content.js'], world: 'ISOLATED' });
   } catch (e) {
     $('sub').textContent = 'Cannot attach to this page';
     $('phase').textContent = e.message;
@@ -182,7 +182,14 @@ on('dates', async () => {
   refresh();
 });
 on('csv', () => fetchAndSave('csv'));
-on('json', () => fetchAndSave('json'));
+on('json', () => fetchAndSave('json', { schemaOrg: $('schemaOrg').checked }));
+// The JSON button saves raw rows, or schema.org Orders when ticked; the choice is kept.
+const jsonLabel = () => { $('json').textContent = $('schemaOrg').checked ? 'Save schema.org JSON' : 'Save raw JSON'; };
+$('schemaOrg').onchange = () => {
+  jsonLabel();
+  try { chrome.storage.local.set({ schemaOrg: $('schemaOrg').checked }); } catch (_) {}
+};
+try { chrome.storage.local.get('schemaOrg', (o) => { $('schemaOrg').checked = !!(o && o.schemaOrg); jsonLabel(); }); } catch (_) {}
 on('sample', () => fetchAndSave('sample'));
 // Two clicks, so a stray one can't throw away an export that took minutes.
 let resetArmed = null;

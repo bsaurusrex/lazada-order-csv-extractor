@@ -1,6 +1,6 @@
 // Runs extension/content.js in a VM with stubbed browser APIs and a fake API.
 const vm = require('vm'), fs = require('fs');
-module.exports = async function run({ src, host, captureRec, pages, cmd = 'run', domCards, after, interceptorSrc, signedOnly, preStore, noCapture, mtop, cookie, cmd2, pageHtml }) {
+module.exports = async function run({ schemaOrg, src, host, captureRec, pages, cmd = 'run', domCards, after, interceptorSrc, signedOnly, preStore, noCapture, mtop, cookie, cmd2, pageHtml }) {
   const listeners = { message: [] }; let onMsg; const downloads = []; const fetched = [];
   const loc = new URL(`https://${host}/user/purchase/`);
   const store = Object.assign({}, preStore || {});
@@ -28,6 +28,9 @@ module.exports = async function run({ src, host, captureRec, pages, cmd = 'run',
   ctx.performance = { getEntriesByType: () => [] };
   if (mtop) win.lib = { mtop: { request: async (opts) => { fetched.push({ url: opts.api, init: opts, via: 'mtop' }); return JSON.parse(JSON.stringify(mtop(opts))); } } };
   if (interceptorSrc) vm.runInContext(interceptorSrc, ctx);
+  ctx.module = undefined;
+  const schemaOrgSrc = require('path').join(__dirname, '..', 'extension', 'schema-org.js');
+  if (fs.existsSync(schemaOrgSrc)) { vm.runInContext(fs.readFileSync(schemaOrgSrc, 'utf8'), ctx); win.__LZX_SCHEMA_ORG__ = ctx.__LZX_SCHEMA_ORG__; }
   vm.runInContext(src, ctx);
   const send = (m) => new Promise((r) => onMsg(m, {}, r));
   // Deliver the recorded request as the interceptor would.
@@ -45,7 +48,7 @@ module.exports = async function run({ src, host, captureRec, pages, cmd = 'run',
   }
   if (cmd2) { await send({ cmd: cmd2 }); await new Promise((r) => setTimeout(r, 50)); }
   const csv = await send({ cmd: 'csv' });
-  const json = await send({ cmd: 'json' });
+  const json = await send({ cmd: 'json', schemaOrg });
   ctx.__store = store;
   return { st0, st, fetched, downloads, csv: csv.file, json: json && json.file, store, ctx };
 };
