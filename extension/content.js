@@ -13,12 +13,14 @@
   // parser, pagination, DOM fallback, file names) branches on this.
   const MARKET = /(^|\.)shopee\./i.test(location.hostname) ? 'shopee'
     : /(^|\.)aliexpress\./i.test(location.hostname) ? 'aliexpress'
-    : /(^|\.)amazon\.(sg|com)$/i.test(location.hostname) ? 'amazon' : 'lazada';
+    : /(^|\.)amazon\.(sg|com)$/i.test(location.hostname) ? 'amazon'
+    : /(^|\.)ebay\.(com|com\.sg)$/i.test(location.hostname) ? 'ebay' : 'lazada';
   const IS_SHOPEE = MARKET === 'shopee';
   const IS_ALIEXPRESS = MARKET === 'aliexpress';
   const IS_AMAZON = MARKET === 'amazon';
+  const IS_EBAY = MARKET === 'ebay';
   // Markets whose rows are stamped with the signed-in account from run().
-  const STAMPS_ACCOUNT = IS_SHOPEE || IS_ALIEXPRESS || IS_AMAZON;
+  const STAMPS_ACCOUNT = IS_SHOPEE || IS_ALIEXPRESS || IS_AMAZON || IS_EBAY;
   // The currency every price on this site is in (ISO 4217), by marketplace and
   // country domain. AliExpress reports a per-order currency and uses its own.
   const SITE_CURRENCY = (() => {
@@ -26,12 +28,13 @@
     const byTld = [[/\.sg$/, 'SGD'], [/\.com\.my$/, 'MYR'], [/\.co\.th$/, 'THB'], [/\.co\.id$/, 'IDR'],
       [/\.(com\.)?ph$/, 'PHP'], [/\.vn$/, 'VND'], [/\.tw$/, 'TWD'], [/\.com\.br$/, 'BRL'], [/\.com\.mx$/, 'MXN'],
       [/\.com\.co$/, 'COP'], [/\.cl$/, 'CLP']];
-    if (/(^|\.)amazon\.com$/.test(h)) return 'USD';
+    if (/(^|\.)(amazon|ebay)\.com$/.test(h)) return 'USD';
     for (const [re, c] of byTld) if (re.test(h)) return c;
     return '';
   })();
   // Per-market keys: a Shopee export must not overwrite the saved Lazada one.
   // amazon.sg and amazon.com are separate accounts, so each keeps its own.
+  // One eBay account covers every eBay site, so ebay.com and ebay.com.sg share one.
   const STORE_TAG = IS_AMAZON ? `amazon_${location.hostname.split('.').pop()}` : MARKET;
   const CAP_KEY = MARKET === 'lazada' ? 'lzx_captures' : `lzx_captures_${STORE_TAG}`;
   const RESULT_KEY = MARKET === 'lazada' ? 'lzx_result' : `lzx_result_${STORE_TAG}`;
@@ -1036,6 +1039,297 @@
     return got;
   }
 
+  // ------------------------------------------------------------------ eBay
+  // ebay.com / ebay.com.sg (verified on ebay.com, Nov 2026). One eBay account
+  // covers every eBay site, so both share one export.
+  //  - Purchases: GET /mye/myebay/ajax/v2/purchase/mp/get?page=N&modules=ALL_TRANSACTIONS…
+  //    returns JSON for every year, newest first. modules.RIVER[0].data.items[]
+  //    is one order each: primaryMessage (status), secondaryMessage ("Order
+  //    date:", date, "Order total:", total), itemCards[] { listingId, title,
+  //    additionalPrice.value { value, currency }, aspectValuesList ("Quantity : 2",
+  //    variation aspects), __myb { orderId, sellerInfo, deliveryMessage } } and an
+  //    action "View order details" -> order.ebay.com/ord/show?orderId=…. Entries
+  //    without itemCards are page furniture.
+  //  - Order details are on order.ebay.com, which this page cannot read (CORS):
+  //    background.js fetches them and returns window.__APP_INITIAL_STATE__ with
+  //    the address, payment and buyer sections already removed. Its modules hold
+  //    dataItems [{ labels, values }]: orderInfo "Time placed"; printerFriendly
+  //    "Order total" ("2 items", "Item discount", "Shipping", "GST*", "Order
+  //    total") and an item table (Quantity, Item name, Shipping service, Item
+  //    price); shipment "Tracking details" "Number".
+  const EB_LIST_PATH = '/mye/myebay/ajax/v2/purchase/mp/get?modules=ALL_TRANSACTIONS&moduleId=122164&pg=purchase&mp=purchase-module-v2&type=v2';
+  const ebText = (x) => (Array.isArray(x) ? x.map(ebText).join(' ')
+    : x && Array.isArray(x.textSpans) ? x.textSpans.map((t) => (t && t.text) || '').join('')
+    : typeof x === 'string' ? x : '').replace(/\s+/g, ' ').trim();
+  const EB_SYMBOLS = [[/US\s?\$/, 'USD'], [/S\$|SGD/, 'SGD'], [/AU\s?\$|AUD/, 'AUD'], [/C\s?\$|CAD/, 'CAD'], [/£|GBP/, 'GBP'], [/€|EUR/, 'EUR'], [/HK\$|HKD/, 'HKD']];
+  const ebCurrencyOf = (t) => { for (const [re, c] of EB_SYMBOLS) if (re.test(String(t || ''))) return c; return ''; };
+  const ebMoney = (t) => {
+    const m = String(t || '').match(/-?\s*(?:[A-Z]{1,3}\s?)?[$£€]?\s?-?\d[\d,]*(?:\.\d{1,2})?/);
+    return m && /\d/.test(m[0]) ? parseMoney(m[0]) : null;
+  };
+  // "Nov 30, 2025 at 3:57 PM" -> "2025-11-30 15:57:00"; a date alone -> "2025-11-30".
+  function ebDateTime(text) {
+    const t = String(text || '');
+    const day = amzDate(t);
+    if (!day) return '';
+    const m = t.match(/(\d{1,2}):(\d{2})\s*([AP]M)?/i);
+    if (!m) return day;
+    let h = Number(m[1]) % 12;
+    if (/pm/i.test(m[3] || '')) h += 12;
+    if (!m[3]) h = Number(m[1]);
+    return `${day} ${String(h).padStart(2, '0')}:${m[2]}:00`;
+  }
+
+  // One page of the purchase list -> orders as listed.
+  function ebParseList(json) {
+    const river = json && json.modules && Array.isArray(json.modules.RIVER) ? json.modules.RIVER : [];
+    const items = (river[0] && river[0].data && river[0].data.items) || [];
+    const out = [];
+    for (const it of items) {
+      const cards = Array.isArray(it.itemCards) ? it.itemCards : [];
+      if (!cards.length) continue;
+      const orderId = cards.map((c) => c.__myb && c.__myb.orderId).find(Boolean) || '';
+      if (!orderId) continue;
+      const sec = (it.secondaryMessage || []).map(ebText);
+      const after = (re) => { const i = sec.findIndex((s) => re.test(s)); return i >= 0 ? (sec[i].replace(re, '').trim() || sec[i + 1] || '') : ''; };
+      const act = (it.actions || []).find((a) => /order details/i.test(a.text || ebText(a)));
+      const url = act && act.action ? (act.action.URL || act.action.url || '') : '';
+      out.push({
+        orderId,
+        url,
+        status: (it.primaryMessage || []).map(ebText).filter(Boolean).join(' '),
+        date: ebDateTime(after(/^order date:?/i)),
+        totalText: after(/^order total:?/i),
+        cards: cards.map((c) => {
+          const aspects = (c.aspectValuesList || []).map(ebText).filter(Boolean);
+          const qa = aspects.find((a) => /^quantity\s*:/i.test(a));
+          const pv = c.additionalPrice && c.additionalPrice.value;
+          const my = c.__myb || {};
+          return {
+            listingId: String(c.listingId || ''),
+            title: ebText(c.title),
+            qty: qa ? parseInt(qa.replace(/\D/g, ''), 10) || 1 : 1,
+            variation: aspects.filter((a) => a !== qa).join('; '),
+            priceValue: pv && typeof pv.value === 'number' ? pv.value : null,
+            currency: (pv && pv.currency) || ebCurrencyOf(ebText(c.additionalPrice)),
+            seller: (my.sellerInfo || []).map(ebText).filter((s) => !/^sold by:?$/i.test(s)).join(' ').trim(),
+            pic: (c.image && (c.image.URL || c.image.url)) || '',
+            delivery: ebText(my.deliveryMessage && my.deliveryMessage.title),
+          };
+        }),
+      });
+    }
+    return out;
+  }
+
+  // Every order, newest first. Stops at the first page that adds nothing new,
+  // or (with a from-year) at the first page whose orders are all older.
+  let ebOrders = null;
+  let ebStoppedAt = 0;
+  async function ebCollectOrders() {
+    const all = [];
+    const seen = new Set();
+    for (let p = 1; p <= 200 && !state.cancel; p++) {
+      const res = await fetch(`${location.origin}${EB_LIST_PATH}&page=${p}`, { credentials: 'include' });
+      const json = safeParse(await res.text());
+      if (!json) throw new Error('eBay did not return the purchase list. Sign in on this tab, then retry.');
+      if (json.isSignin === false) throw new Error('eBay asked to sign in again. Sign in on this tab, then retry.');
+      const got = ebParseList(json).filter((o) => !seen.has(o.orderId));
+      if (!got.length) break;
+      for (const o of got) { seen.add(o.orderId); all.push(o); }
+      log(`eBay: ${all.length} orders found so far`);
+      if (FROM_YEAR && got.every((o) => o.date && Number(o.date.slice(0, 4)) < FROM_YEAR)) break;
+      await sleep(400 + Math.random() * 200);
+    }
+    if (!FROM_YEAR) return all;
+    const kept = all.filter((o) => !o.date || Number(o.date.slice(0, 4)) >= FROM_YEAR);
+    if (kept.length < all.length) {
+      ebStoppedAt = FROM_YEAR;
+      log(`Skipping eBay orders before ${FROM_YEAR}.`);
+    }
+    return kept;
+  }
+
+  // Order details through background.js (see above).
+  function ebDetail(url) {
+    return new Promise((resolve, reject) => {
+      try {
+        chrome.runtime.sendMessage({ cmd: 'ebayDetail', url }, (res) => {
+          const err = chrome.runtime.lastError;
+          if (err || !res) return reject(new Error((err && err.message) || 'no answer from the extension'));
+          if (!res.ok) return reject(new Error(res.error === 'signin' ? 'eBay asked to sign in again. Sign in on this tab, then retry.' : res.error));
+          resolve(res.state);
+        });
+      } catch (e) { reject(e); }
+    });
+  }
+
+  // Label/value rows from the detail state, with the section each sits in.
+  function ebPairs(st) {
+    const out = [];
+    (function walk(n, sec, depth) {
+      if (!n || typeof n !== 'object' || depth > 30) return;
+      if (Array.isArray(n)) { n.forEach((x) => walk(x, sec, depth + 1)); return; }
+      const title = n.title ? ebText(n.title) : '';
+      const here = title || sec;
+      if (n.labels && n.values) out.push({ sec: here, label: ebText(n.labels), value: ebText(n.values) });
+      for (const [k, v] of Object.entries(n)) if (k !== 'labels' && k !== 'values') walk(v, here, depth + 1);
+    })(st && st.modules, '', 0);
+    return out;
+  }
+  // The printer-friendly item table: Quantity, Item name, Shipping service, Item price.
+  function ebItemTable(st) {
+    let table = null;
+    (function walk(n, depth) {
+      if (table || !n || typeof n !== 'object' || depth > 30) return;
+      if (n.table && n.table.header && Array.isArray(n.table.rows)) {
+        const head = (n.table.header.cells || []).map(ebText);
+        if (head.some((h) => /item price|price/i.test(h))) { table = { head, rows: n.table.rows.map((r) => (r.cells || []).map(ebText)) }; return; }
+      }
+      for (const v of Object.values(n)) walk(v, depth + 1);
+    })(st && st.modules, 0);
+    if (!table) return [];
+    const col = (re) => table.head.findIndex((h) => re.test(h));
+    const q = col(/^qty|quantity/i), name = col(/item name|item$/i), svc = col(/shipping service|service/i), price = col(/item price|price/i);
+    return table.rows.map((c) => ({ qty: parseInt(c[q], 10) || 1, title: c[name] || '', service: svc >= 0 ? c[svc] || '' : '', priceText: c[price] || '' }));
+  }
+
+  // One order's rows: the list entry, completed from its detail page when read.
+  function ebParseOrder(o, st, page) {
+    const pairs = st ? ebPairs(st) : [];
+    const get = (re, sec) => (pairs.find((p) => re.test(p.label) && (!sec || sec.test(p.sec))) || {}).value || '';
+    const currency = (o.cards.find((c) => c.currency) || {}).currency || ebCurrencyOf(o.totalText) || SITE_CURRENCY;
+    const sums = { subtotal: null, ship: 0, tax: 0, disc: 0, gift: 0, fees: 0, total: null };
+    let hasShip = false, hasTax = false, hasFees = false;
+    const charges = [];
+    for (const p of pairs.filter((x) => /^order total$/i.test(x.sec))) {
+      const v = ebMoney(p.value);
+      if (v == null) continue;
+      charges.push(`${p.label}=${p.value}`);
+      const l = p.label.toLowerCase();
+      if (/^\d+ items?$|subtotal|^items?$/.test(l)) sums.subtotal = v;
+      else if (/^order total|^total$/.test(l)) sums.total = v;
+      else if (/gift card|ebay bucks|voucher balance/.test(l)) sums.gift += Math.abs(v);
+      else if (v < 0 || /discount|coupon|saving|promo|voucher|credit|reward/.test(l)) sums.disc += Math.abs(v);
+      else if (/shipping|postage|delivery/.test(l)) { sums.ship += v; hasShip = true; }
+      else if (/\b(gst|tax|vat)\b|gst\*/.test(l)) { sums.tax += v; hasTax = true; }
+      else { sums.fees += v; hasFees = true; }   // import charges, handling and any other added fee
+    }
+    if (sums.total == null) sums.total = ebMoney(get(/^total$/i, /order info/i)) ?? ebMoney(o.totalText);
+    const placed = ebDateTime(get(/^time placed$/i)) || ebDateTime(get(/^placed on$/i)) || o.date;
+    const paid = ebDateTime(get(/^paid on$/i));
+    const tracking = [...new Set(pairs.filter((p) => /^(tracking )?number$/i.test(p.label) && /track/i.test(p.sec)).map((p) => p.value))].join(' | ');
+    const shipText = st ? JSON.stringify(st.modules.shipment || {}) : '';
+    const delivered = ((shipText.match(/Delivered on [A-Za-z]{3}, ([A-Za-z]{3,9} \d{1,2}, \d{4})/) || [])[1]) || '';
+    const seller = get(/^sold by$/i) || get(/^seller$/i);
+    const table = st ? ebItemTable(st) : [];
+    // "Item price" is the line's total on eBay's page ("2 items $118.00" with one
+    // row of quantity 2 at $118.00), except where only unit prices add up.
+    const prices = table.map((r) => ebMoney(r.priceText));
+    const asLines = sums.subtotal == null || Math.abs(prices.reduce((a, b) => a + (b || 0), 0) - sums.subtotal) < 0.011
+      || Math.abs(table.reduce((a, r, i) => a + (prices[i] || 0) * r.qty, 0) - sums.subtotal) >= 0.011;
+    const cancelled = /cancel/i.test(o.status);
+    const n = Math.max(table.length, o.cards.length);
+    const rows = [];
+    for (let i = 0; i < n; i++) {
+      const t = table[i];
+      const card = (t && o.cards.find((c) => c.title && t.title && (t.title.startsWith(c.title.slice(0, 30)) || c.title.startsWith(t.title.slice(0, 30))))) || o.cards[i] || {};
+      const qty = (t && t.qty) || card.qty || 1;
+      const p = t ? prices[i] : null;
+      const line = p == null ? null : asLines ? p : p * qty;
+      rows.push({
+        _page: page, _source: 'ebay',
+        accountId: '',   // stamped by run() with the signed-in publicUserId
+        orderId: o.orderId, orderSn: '',
+        lineId: `${o.orderId}-${card.listingId || i}-${i}`,
+        purchasedAt: placed, paidAt: paid, shippedAt: '', deliveredAt: amzDate(delivered), completedAt: '',
+        cancelledAt: '', cancelReason: '',
+        carrier: '', trackingNumber: tracking, parcels: '',
+        deliveryMethod: t ? t.service : '',
+        amountPaid: '', coinsEarned: '',
+        subtotal: sums.subtotal != null ? sums.subtotal.toFixed(2) : '',
+        shippingFee: hasShip ? sums.ship.toFixed(2) : '',
+        tax: hasTax ? sums.tax.toFixed(2) : '',
+        otherFees: hasFees ? sums.fees.toFixed(2) : '',
+        discount: sums.disc ? sums.disc.toFixed(2) : '',
+        giftCardAmount: sums.gift ? sums.gift.toFixed(2) : '',
+        orderTotal: sums.total != null ? sums.total.toFixed(2) : '',
+        cashback: '', refundAmount: '',
+        charges: charges.join(' | '),
+        status: cancelled ? 'Cancelled' : o.status, statusDetail: o.status, itemStatus: card.delivery || '', refunded: '',
+        title: (t && t.title) || card.title || '', variation: card.variation || '',
+        quantity: qty,
+        price: line != null ? (line / qty).toFixed(2) : '',
+        unitPricePaid: '',
+        lineTotal: line != null ? line.toFixed(2) : '',
+        priceBeforeDiscount: '',
+        currency, paymentMethod: '',
+        shopName: seller || card.seller || '',
+        itemId: card.listingId || '', skuId: '',
+        orderDetailUrl: o.url,
+        itemUrl: card.listingId ? `${location.origin}/itm/${card.listingId}` : '',
+        picUrl: card.pic || '',
+        detailsVersion: st ? DETAILS_VERSION : '',
+      });
+    }
+    return rows;
+  }
+
+  // "Page" n = orders (n-1)*10 .. n*10-1, each completed from its detail page.
+  async function ebFetchPage(page) {
+    if (page === 1 || !ebOrders) ebOrders = await ebCollectOrders();
+    const batch = ebOrders.slice((page - 1) * 10, page * 10);
+    const rows = [];
+    for (const o of batch) {
+      if (state.cancel) break;
+      let st = null;
+      if (o.url) {
+        try { st = await ebDetail(o.url); }
+        catch (e) {
+          if (/sign in/i.test(e.message)) throw e;
+          log(`Order ${o.orderId}: ${e.message}`);
+        }
+        await sleep(350 + Math.random() * 250);
+      }
+      rows.push(...ebParseOrder(o, st, page));
+    }
+    return { rows, raw: [], totalPages: Math.ceil(ebOrders.length / 10) || 0, hasMore: page * 10 < ebOrders.length, empty: !batch.length };
+  }
+
+  // Re-read orders whose detail page failed during the export.
+  async function ebRunDetails(delayMs) {
+    state.detailError = '';
+    const ids = undatedOrders();
+    if (!ids.length) { log('Every order already has its details.'); return 0; }
+    state.phase = 'details';
+    state.progress = { done: 0, total: ids.length, message: state.progress.message };
+    let got = 0;
+    for (let i = 0; i < ids.length && !state.cancel; i++) {
+      const id = ids[i];
+      const old = state.rows.filter((r) => String(r.orderId) === id);
+      const url = (old.find((r) => r.orderDetailUrl) || {}).orderDetailUrl || '';
+      try {
+        if (!url) throw new Error('no order-details link');
+        const st = await ebDetail(url);
+        // Rebuild the list entry from the saved rows, then complete it.
+        const o = { orderId: id, url, status: (old[0] || {}).statusDetail || '', date: (old[0] || {}).purchasedAt || '', totalText: (old[0] || {}).orderTotal || '',
+          cards: old.map((r) => ({ listingId: r.itemId, title: r.title, qty: Number(r.quantity) || 1, variation: r.variation, currency: r.currency, seller: r.shopName, pic: r.picUrl, delivery: r.itemStatus })) };
+        const rows = ebParseOrder(o, st, 0);
+        for (const r of rows) r.accountId = currentAccount;
+        state.rows = state.rows.filter((r) => String(r.orderId) !== id).concat(rows);
+        got++;
+      } catch (e) {
+        log(`Order ${id}: ${e.message}`);
+        if (/sign in/i.test(e.message)) { state.detailError = e.message; break; }
+      }
+      state.progress.done = i + 1;
+      await sleep(delayMs + Math.random() * 200);
+    }
+    invalidate();
+    log(`Detail pass done — ${got} orders read.`);
+    return got;
+  }
+
   // Which marketplace a recorded request belongs to, by its host.
   const marketOf = (url) => {
     try { return /(^|\.)shopee\./i.test(new URL(url).hostname) ? 'shopee' : 'lazada'; } catch (_) { return MARKET; }
@@ -1188,6 +1482,11 @@
   }
 
   async function ensureCapture() {
+    if (IS_EBAY) {
+      ebOrders = null;
+      return { kind: 'ebay', rec: { url: `${location.origin}/mye/myebay/purchase` },
+               pager: { where: 'purchase list + order details', offset: true, make: () => ({}) } };
+    }
     if (IS_AMAZON) {
       amzIds = null;
       return { kind: 'amazon', rec: { url: `${location.origin}/your-orders/orders` },
@@ -1430,7 +1729,7 @@
   }
 
   function detectTotalPages() {
-    if (IS_SHOPEE || IS_ALIEXPRESS || IS_AMAZON) return 0;   // no page count until the run ends
+    if (IS_SHOPEE || IS_ALIEXPRESS || IS_AMAZON || IS_EBAY) return 0;   // no page count until the run ends
     // Scoped to the pager. Scanning the whole body would read a delivery date
     // like "9/2026" as 2026 pages.
     const scopes = document.querySelectorAll('[class*="pagination"],[class*="pager"],[class*="next-pagination"]');
@@ -1657,7 +1956,7 @@
   // Bump a marketplace's version when its detail pass learns to read more:
   // orders read by any other version are offered again. CHANGELOG.md says what
   // each version added.
-  const DETAILS_VERSION = IS_SHOPEE ? '9' : IS_ALIEXPRESS ? 'ae1' : IS_AMAZON ? 'amz1' : '4';
+  const DETAILS_VERSION = IS_SHOPEE ? '9' : IS_ALIEXPRESS ? 'ae1' : IS_AMAZON ? 'amz1' : IS_EBAY ? 'eb1' : '4';
 
   function undatedOrders() {
     const dated = new Set();
@@ -1924,6 +2223,7 @@
 
   async function runDetails(delayMs) {
     if (IS_AMAZON) return amzRunDetails(delayMs);
+    if (IS_EBAY) return ebRunDetails(delayMs);
     if (IS_ALIEXPRESS) return aeRunDetails(delayMs);
     state.detailError = '';
     // Orders that failed before go last, so they cannot trip the early stop
@@ -2130,6 +2430,7 @@
   let currentAccount = '';
   const NUMERIC_ID = /^\d{3,20}$/;
   const AMZ_CUSTOMER_ID = /^A[A-Z0-9]{8,20}$/;
+  const EBAY_PUBLIC_ID = /^[A-Za-z0-9]{8,20}$/;
   const LZ_BUYER_KEYS = ['buyerId', 'buyerUserId', 'buyerUid', 'userId', 'memberId', 'customerId'];
   function numericBuyerId(...objs) {
     for (const o of objs) {
@@ -2171,6 +2472,12 @@
         // carries it as "customerID":"…" beside "marketplaceID" (not that one).
         const m = document.documentElement.innerHTML.match(/"customerID"\s*:\s*"(A[A-Z0-9]{8,20})"/);
         if (m && AMZ_CUSTOMER_ID.test(m[1])) id = m[1];
+      } else if (IS_EBAY) {
+        // eBay's publicUserId: an opaque, stable account ID (letters and digits,
+        // no name in it) that the page carries as "publicUserId=…". Never the
+        // username, which the page also carries as "userId".
+        const m = document.documentElement.innerHTML.match(/publicUserId["']?\s*[=:]\s*["']?([A-Za-z0-9]{8,20})\b/);
+        if (m && EBAY_PUBLIC_ID.test(m[1])) id = m[1];
       } else if (IS_ALIEXPRESS) {
         let raw = '';
         try { raw = decodeURIComponent(cookieValue('aep_usuc_f')); } catch (_) {}
@@ -2237,6 +2544,7 @@
 
   async function fetchPage(cap, page) {
     if (cap.kind === 'amazon') return amzFetchPage(page);
+    if (cap.kind === 'ebay') return ebFetchPage(page);
     if (cap.kind === 'aliexpress') {
       const out = await aeFetchPage(page);
       if (!out) throw new Error(`page ${page}: AliExpress order list was not in a known shape`);
@@ -2299,6 +2607,7 @@
     let reachedEnd = false;
     let cutoffStop = false;
     amzStoppedAt = 0;
+    ebStoppedAt = 0;
     let fresh = 0;
     // Newest-first lists: once a whole page is older than the cutoff, so is
     // everything after it. Lazada's list has no dates, so it reads every page.
@@ -2385,7 +2694,7 @@
       // the same browser): their orders must not be added to the previous account's.
       if (STAMPS_ACCOUNT) for (const r of first.rows) r.accountId = currentAccount;
       const relation = accountRelation(prior, first.rows);
-      const marketName = IS_SHOPEE ? 'Shopee' : IS_ALIEXPRESS ? 'AliExpress' : IS_AMAZON ? 'Amazon' : 'Lazada';
+      const marketName = IS_SHOPEE ? 'Shopee' : IS_ALIEXPRESS ? 'AliExpress' : IS_AMAZON ? 'Amazon' : IS_EBAY ? 'eBay' : 'Lazada';
       if (merging && relation === 'different') {
         log(`This is a different ${marketName} account from your last export, so this is a new export for it. The last account's export is replaced: save it first if you still need it.`);
         merging = false; prior = []; priorByKey = new Map(); priorByOrder.clear(); stopEarly = false; hadDates = false;
@@ -2440,7 +2749,7 @@
       // Complete only if this run read from page 1 to the end, or caught up
       // with an export that itself was complete.
       state.complete = !state.cancel && start === 1 && (caughtUp || (reachedEnd && (trustEnd || cutoffStop)));
-      if (!caughtUp) state.coveredFrom = cutoffStop || amzStoppedAt ? FROM_YEAR : 0;
+      if (!caughtUp) state.coveredFrom = cutoffStop || amzStoppedAt || ebStoppedAt ? FROM_YEAR : 0;
       if (!state.complete && !state.cancel && start === 1) log('Not every page was read, so the next update will read them all again.');
 
       // Someone who added dates before expects new orders dated too.
@@ -2566,7 +2875,8 @@
     if (!m) return t;
     return m[2] ? `${m[1]} ${m[2]}:${m[3] || '00'}` : m[1];
   }
-  const MARKET_LABEL = () => location.hostname.toLowerCase().replace(/^(www|my|m|member|order|sale)\./, '');
+  // eBay: one account across its sites, so one label whichever site ran the export.
+  const MARKET_LABEL = () => (IS_EBAY ? 'ebay.com' : location.hostname.toLowerCase().replace(/^(www|my|m|member|order|sale)\./, ''));
 
   // Lazada's breakdown mixes package-level and order-level lines, sometimes
   // shows the subtotal after item discounts and sometimes before, and repeats
@@ -2768,9 +3078,9 @@
     const SHOPEE_SYMBOL = { sg: '$', my: 'RM', ph: '₱', th: '฿', id: 'Rp', vn: '₫', tw: 'NT$', br: 'R$' };
     const meta = {
       exported: new Date().toLocaleString(), rows: slim.length,
-      market: IS_SHOPEE ? 'Shopee' : IS_ALIEXPRESS ? 'AliExpress' : IS_AMAZON ? 'Amazon' : 'Lazada',
+      market: IS_SHOPEE ? 'Shopee' : IS_ALIEXPRESS ? 'AliExpress' : IS_AMAZON ? 'Amazon' : IS_EBAY ? 'eBay' : 'Lazada',
       symbol: IS_SHOPEE ? (SHOPEE_SYMBOL[location.hostname.split('.').pop()] || '')
-        : IS_ALIEXPRESS ? aeSymbol() : IS_AMAZON ? (amzCurrency() === 'SGD' ? 'S$' : '$') : '',
+        : IS_ALIEXPRESS || IS_EBAY ? aeSymbol() : IS_AMAZON ? (amzCurrency() === 'SGD' ? 'S$' : '$') : '',
     };
     const tpl = await fetch(chrome.runtime.getURL('report.html')).then((r) => r.text());
     // A "</script>" inside the data would close the tag early.
@@ -2911,7 +3221,7 @@
     if (inFrame) return;
     const prev = await store.get(RESULT_KEY);
     // Only ever restore an export captured on this same Lazada market.
-    if (prev && prev.origin === location.origin
+    if (prev && (prev.origin === location.origin || (IS_EBAY && /^https:\/\/(www\.)?ebay\.(com|com\.sg)$/i.test(String(prev.origin))))
         && Array.isArray(prev.rows) && prev.rows.length && !state.rows.length && !state.running) {
       // Exports saved before 2.7.1 have no currency column; the saved export is
       // tied to this origin, so the site's currency applies.

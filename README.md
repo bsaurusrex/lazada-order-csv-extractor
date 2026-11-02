@@ -57,7 +57,7 @@ To run your working copy instead of the store build:
 
 1. `chrome://extensions` → **Developer mode** → **Load unpacked** → pick `extension/`.
 2. After editing, click the reload arrow on the extension's card, then **reload every
-   marketplace tab** (Lazada, Shopee, AliExpress, Amazon). A tab opened before the reload
+   marketplace tab** (Lazada, Shopee, AliExpress, Amazon, eBay). A tab opened before the reload
    keeps running the previous build's page script (`interceptor.js`) until it is reloaded,
    and errors it raises are still reported against the old line numbers.
 3. Run the tests: `npm install` once, then `npm test`. Each test loads `extension/` into a
@@ -98,6 +98,15 @@ The extension records one genuine request, finds the page field by **deep** sear
 `lifecycle.pageNum`, nested inside the POST body, where a top-level scan misses it — and replays
 that request per page with only that field changed. `module.lifecycle.totalPageNum` gives the
 true page count. If no request can be recorded, it falls back to reading the rendered DOM.
+
+### eBay
+
+eBay's purchase list comes as JSON from `www.ebay.com` (every year, newest first), but each
+order's details — time placed, price breakdown, tracking — are on `order.ebay.com`, which a
+page on `www.ebay.com` cannot read. A small background worker (`background.js`) fetches those
+order pages for the extension's own eBay tab, accepts no other address, and removes the
+address, payment and buyer sections before handing the order data back. One eBay account
+covers every eBay site, so `ebay.com` and `ebay.com.sg` share one export.
 
 ### Response shape
 
@@ -172,13 +181,13 @@ are kept, so lowering the year brings them back without reading them again.
 ## Columns
 
 One row per order **item**. An order with three products is three rows sharing an `orderId`.
-Every marketplace (Lazada, Shopee, AliExpress, Amazon) exports the same core columns, in the
+Every marketplace (Lazada, Shopee, AliExpress, Amazon, eBay) exports the same core columns, in the
 same order and with the same meaning; a column a marketplace cannot fill is left blank.
 
 | Column | |
 |---|---|
 | `marketplace` | The site the order came from: `lazada.sg`, `shopee.sg`, `aliexpress.com`, `amazon.com`, … |
-| `accountId` | The marketplace's own ID for the signed-in buyer (numeric; Amazon's customer ID). Never an email, name or phone |
+| `accountId` | The marketplace's own ID for the signed-in buyer (numeric; Amazon's customer ID; eBay's public user ID). Never an email, username, name or phone |
 | `orderId`, `orderSn`, `lineId` | Order, the order number shown to the buyer where it differs (Shopee), and the line within the order |
 | `purchasedAt` … `cancelledAt` | `YYYY-MM-DD HH:MM:SS` in the site's local time (`YYYY-MM-DD` where the site shows no time). Blank when unknown |
 | `status`, `statusDetail` | `pending`, `paid`, `processing`, `shipped`, `delivered`, `completed`, `cancelled` or `refunded`; the site's own wording in `statusDetail` when it says more |

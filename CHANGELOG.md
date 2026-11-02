@@ -3,6 +3,35 @@
 Every release of Order History to CSV (named Lazada Order CSV Extractor up to 2.2.2).
 Newest first.
 
+## 2.11.0 — 2026-11-02
+
+**Added: eBay** (ebay.com, ebay.com.sg)
+- The purchase list is read as JSON from `www.ebay.com` (every year, newest first), and each
+  order is completed from its detail page: time placed, paid date, items with quantity and
+  variation, seller, the price breakdown (items, item discount, shipping, GST or sales tax,
+  order total), tracking number and delivery date. Every order is checked by `totalsCheck`.
+- Order details are on `order.ebay.com`, which the purchase page cannot read, so a new
+  background worker (`background.js`) fetches them. It accepts only
+  `https://order.ebay.com[.sg]/ord/show` addresses, answers only the extension's own eBay
+  tabs, and removes the delivery address, payment details and buyer name before returning
+  the order data.
+- `accountId` is eBay's `publicUserId`: an opaque, stable account ID with no name in it.
+  The username, which eBay pages also carry, is never read into an export.
+- One eBay account covers every eBay site, so `ebay.com` and `ebay.com.sg` share one saved
+  export and every row is labelled `marketplace` = `ebay.com`.
+- "Only orders from" works on eBay: the list stops at the first page whose orders are all
+  older, and older orders are never opened.
+- An order whose detail page fails is exported from the list and re-read by
+  **Add purchase dates**.
+
+**Changed**
+- PRIVACY.md describes all five marketplaces, the personal data left out of every file, and
+  the eBay background worker.
+
+**Development**
+- Tests for eBay (list, details, re-read, from-year, accountId) and for the background
+  worker's limits; `tools/check.sh` also checks the worker file exists.
+
 ## 2.10.0 — 2026-10-25
 
 **Added**

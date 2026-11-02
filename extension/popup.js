@@ -18,9 +18,10 @@ try {
   $('version').textContent = `Version ${m.version_name || m.version}`;
 } catch (_) {}
 // Order list page per marketplace.
-const ORDER_PATHS = { lazada: '/customer/order/index/', shopee: '/user/purchase/', aliexpress: '/p/order/index.html', amazon: '/your-orders/orders' };
+const ORDER_PATHS = { lazada: '/customer/order/index/', shopee: '/user/purchase/', aliexpress: '/p/order/index.html', amazon: '/your-orders/orders', ebay: '/mye/myebay/purchase' };
 const marketOfUrl = (u) => (/shopee\./i.test(u || '') ? 'shopee' : /aliexpress\./i.test(u || '') ? 'aliexpress'
-  : /\/\/(www\.)?amazon\.(sg|com)\//i.test(u || '') ? 'amazon' : /lazada\./i.test(u || '') ? 'lazada' : '');
+  : /\/\/(www\.)?amazon\.(sg|com)\//i.test(u || '') ? 'amazon'
+  : /\/\/(www\.)?ebay\.(com|com\.sg)\//i.test(u || '') ? 'ebay' : /lazada\./i.test(u || '') ? 'lazada' : '');
 const RUN_NOTE = ($('runNote') || {}).innerHTML || '';
 const n = (v) => (v || 0).toLocaleString();
 

@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "Order History to CSV",
-  "version": "2.10.0",
-  "version_name": "2.10.0 dev schema.org",
-  "description": "Export your order history to CSV \u2014 every item, price, status and shop, with optional purchase dates. Works with Lazada, Shopee, AliExpress and Amazon (SG, US).",
+  "version": "2.11.0",
+  "version_name": "2.11.0 dev ebay",
+  "description": "Export your order history to CSV — every item, price, status and shop, with optional purchase dates. Works with Lazada, Shopee, AliExpress and Amazon (SG, US).",
   "action": {
     "default_popup": "popup.html",
     "default_title": "Order History to CSV",
@@ -37,7 +37,9 @@
     "*://*.aliexpress.com/*",
     "*://*.aliexpress.us/*",
     "*://*.amazon.sg/*",
-    "*://*.amazon.com/*"
+    "*://*.amazon.com/*",
+    "*://*.ebay.com/*",
+    "*://*.ebay.com.sg/*"
   ],
   "content_scripts": [
     {
@@ -59,7 +61,9 @@
         "*://*.aliexpress.com/*",
         "*://*.aliexpress.us/*",
         "*://*.amazon.sg/*",
-        "*://*.amazon.com/*"
+        "*://*.amazon.com/*",
+        "*://*.ebay.com/*",
+        "*://*.ebay.com.sg/*"
       ],
       "js": [
         "interceptor.js"
@@ -87,7 +91,9 @@
         "*://*.aliexpress.com/*",
         "*://*.aliexpress.us/*",
         "*://*.amazon.sg/*",
-        "*://*.amazon.com/*"
+        "*://*.amazon.com/*",
+        "*://*.ebay.com/*",
+        "*://*.ebay.com.sg/*"
       ],
       "js": [
         "schema-org.js",
@@ -127,8 +133,13 @@
         "*://*.aliexpress.com/*",
         "*://*.aliexpress.us/*",
         "*://*.amazon.sg/*",
-        "*://*.amazon.com/*"
+        "*://*.amazon.com/*",
+        "*://*.ebay.com/*",
+        "*://*.ebay.com.sg/*"
       ]
     }
-  ]
+  ],
+  "background": {
+    "service_worker": "background.js"
+  }
 }

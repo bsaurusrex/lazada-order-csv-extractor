@@ -1,6 +1,6 @@
 // Runs extension/content.js in a VM with stubbed browser APIs and a fake API.
 const vm = require('vm'), fs = require('fs');
-module.exports = async function run({ schemaOrg, src, host, captureRec, pages, cmd = 'run', domCards, after, interceptorSrc, signedOnly, preStore, noCapture, mtop, cookie, cmd2, pageHtml }) {
+module.exports = async function run({ runtimeSend, schemaOrg, src, host, captureRec, pages, cmd = 'run', domCards, after, interceptorSrc, signedOnly, preStore, noCapture, mtop, cookie, cmd2, pageHtml }) {
   const listeners = { message: [] }; let onMsg; const downloads = []; const fetched = [];
   const loc = new URL(`https://${host}/user/purchase/`);
   const store = Object.assign({}, preStore || {});
@@ -15,7 +15,9 @@ module.exports = async function run({ schemaOrg, src, host, captureRec, pages, c
     window: win, document: doc, location: loc, console, URL, URLSearchParams, Blob: class { constructor(p){ this.p=p; } },
     setTimeout, clearTimeout, Date, Math, JSON, Promise, Map, Set, Number, String, RegExp, Array, Object, Error, CSS: { escape: (s) => s },
     chrome: { storage: { local: { set(o){ Object.assign(store,o); }, get(k,cb){ cb({[k]:store[k]}); }, remove(k,cb){ for (const x of [].concat(k)) delete store[x]; cb(); } }, onChanged: { addListener(){} } },
-              runtime: { onMessage: { addListener: (f) => { onMsg = f; } }, getURL: (x) => x } },
+              runtime: { onMessage: { addListener: (f) => { onMsg = f; } }, getURL: (x) => x,
+              // What background.js would answer (eBay order details).
+              sendMessage: (msg, cb) => { Promise.resolve(runtimeSend ? runtimeSend(msg) : undefined).then((v) => cb && cb(v)); } } },
     // Direct (isolated-world) fetch: a Shopee-like host rejects it unsigned.
     fetch: async (url, init) => { fetched.push({ url, init, via: 'direct' }); const body = signedOnly ? { error: 90309999, error_msg: '' } : pages(url, init); return { status: 200, url: String(url), text: async () => (typeof body === 'string' ? body : JSON.stringify(body)) }; },
   };

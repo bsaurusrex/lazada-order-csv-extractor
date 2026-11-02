@@ -9,7 +9,7 @@
 // don't, so a reader can rebuild the CSV's rows exactly.
 (function (root) {
   const OHC = 'https://github.com/ezbz/lazada-order-csv-extractor#';
-  const MARKETS = [[/^lazada\./, 'Lazada'], [/^shopee\./, 'Shopee'], [/^aliexpress\./, 'AliExpress'], [/^amazon\./, 'Amazon']];
+  const MARKETS = [[/^lazada\./, 'Lazada'], [/^shopee\./, 'Shopee'], [/^aliexpress\./, 'AliExpress'], [/^amazon\./, 'Amazon'], [/^ebay\./, 'eBay']];
   // The export's normalized status words, as schema.org OrderStatus values.
   const ORDER_STATUS = {
     pending: 'OrderPaymentDue', processing: 'OrderProcessing', paid: 'OrderProcessing',

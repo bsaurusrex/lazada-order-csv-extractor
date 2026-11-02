@@ -1,7 +1,7 @@
 // MAIN world, document_start (also injected on demand by the popup).
 // Records order requests on Lazada, Shopee and AliExpress so they can be replayed
 // page by page, and bridges the page's signed fetch (Shopee) and mtop (AliExpress)
-// calls. Leaves Amazon alone: it is read from its order pages. Everything stays in this tab.
+// calls. Leaves Amazon and eBay alone: they are read from their order pages. Everything stays in this tab.
 (() => {
   // Frames: only the hidden order frame the dates pass loads (see content.js).
   if (window !== window.top && window.name !== 'lzx-prime') return;
@@ -12,11 +12,11 @@
   const VERSION = 3;   // 3: AliExpress mtop bridge
   if ((window.__LZX_INTERCEPTOR_V__ || 0) >= VERSION) return;
   const olderPresent = !!window.__LZX_INTERCEPTOR__;
-  // Amazon is read from its order pages by the content script, so nothing
-  // recorded there is ever used. Leave its fetch/XHR alone: a wrapped call that
+  // Amazon and eBay are read from their order pages by the content script, so
+  // nothing recorded there is ever used. Leave its fetch/XHR alone: a wrapped call that
   // fails (blocked trackers, aborted requests) is otherwise reported against
   // this file in chrome://extensions.
-  const RECORDS = !/(^|\.)amazon\.(sg|com)$/i.test(location.hostname);
+  const RECORDS = !/(^|\.)(amazon\.(sg|com)|ebay\.(com|com\.sg))$/i.test(location.hostname);
   window.__LZX_INTERCEPTOR__ = true;
   window.__LZX_INTERCEPTOR_V__ = VERSION;
 

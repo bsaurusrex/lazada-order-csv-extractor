@@ -44,6 +44,7 @@ python3 - <<'PY' || fail=1
 import json, os, sys
 m = json.load(open('extension/manifest.json'))
 need = set(m['icons'].values()) | {'popup.html'} | {f for c in m['content_scripts'] for f in c['js']}
+if m.get('background', {}).get('service_worker'): need.add(m['background']['service_worker'])
 missing = sorted(f for f in need if not os.path.exists(os.path.join('extension', f)))
 print('  version', m['version'], '| files missing:', missing or 'none')
 sys.exit(1 if missing else 0)
