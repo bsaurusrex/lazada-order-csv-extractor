@@ -3,6 +3,22 @@
 Every release of Order History to CSV (named Lazada Order CSV Extractor up to 2.2.2).
 Newest first.
 
+## 2.11.1 — 2026-11-02
+
+**Fixed: eBay, from the first real export**
+- eBay no longer keeps details for some older orders: their page says "Order not found"
+  (21 of 55 on the account tested, all from 2017). They export from the purchase list (date,
+  items, seller, order total) with `charges` = "eBay: order details no longer available", no
+  price breakdown, and are not opened again on later exports. The log says how many.
+- Listings eBay has purged have no title anywhere, not even on the item page; they are named
+  "eBay listing <number> (no longer on eBay)".
+- Fixes from the first real export: a refunded order's `orderTotal` is what was charged ("Amount
+  paid"), not eBay's net $0.00; the same listing bought in two variations matches each table row
+  to its own item (by quantity) instead of both to the first; HTML-escaped text ("&#x2a;") is
+  decoded; item names lose the "(listing number)" eBay appends; `accountId` is also found where
+  the page carries it percent-encoded or as `puid` (ebay.com.sg).
+- eBay details are now version eb2, so orders read before these fixes are read once more.
+
 ## 2.11.0 — 2026-11-02
 
 **Added: eBay** (ebay.com, ebay.com.sg)
@@ -32,18 +48,6 @@ Newest first.
   status. Without a detail page, the delivery date comes from the list ("Delivered on Sun,
   Dec 14", dated on or after the order).
 
-- eBay no longer keeps details for some older orders: their page says "Order not found"
-  (21 of 55 on the account tested, all from 2017). They export from the purchase list (date,
-  items, seller, order total) with `charges` = "eBay: order details no longer available", no
-  price breakdown, and are not opened again on later exports. The log says how many.
-- Listings eBay has purged have no title anywhere, not even on the item page; they are named
-  "eBay listing <number> (no longer on eBay)".
-- Fixes from the first real export: a refunded order's `orderTotal` is what was charged ("Amount
-  paid"), not eBay's net $0.00; the same listing bought in two variations matches each table row
-  to its own item (by quantity) instead of both to the first; HTML-escaped text ("&#x2a;") is
-  decoded; item names lose the "(listing number)" eBay appends; `accountId` is also found where
-  the page carries it percent-encoded or as `puid` (ebay.com.sg).
-- eBay details are now version eb2, so orders read before these fixes are read once more.
 
 **Changed**
 - PRIVACY.md describes all five marketplaces, the personal data left out of every file, and
