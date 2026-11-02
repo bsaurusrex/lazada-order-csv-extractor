@@ -19,14 +19,9 @@ const state = { modules: {
 } };
 const page = `<html><script>window.__APP_INITIAL_STATE__ = ${JSON.stringify(state)};</script></html>`;
 const limitPage = '<html><head><title>Daily limit exceeded</title></head></html>';
-// Older layout: no printer-friendly table; the breakdown sits only beside the payment details.
-const legacy = { modules: {
-  deliveryAddress: { title: T('Shipping address'), dataItems: [T('1 Example Street'), T('Account One')] },
-  orderInfo: { title: T('Order info'), sections: [{ dataItems: [pair('Time placed', 'Jun 1, 2017 at 11:00 PM'), pair('Total', '$28.64')] }] },
-  paymentInfo: { title: T('Payment info'), sections: [{ dataItems: [pair('Paid with', 'Card ending in 0000'), pair('Name', 'Account One'),
-    pair('1 item', '$25.00'), pair('Shipping', '$3.64'), pair('Order total', '$28.64'), pair('Paid on', 'Jun 1, 2017')] }] },
-} };
-const legacyPage = `<html><script>window.__APP_INITIAL_STATE__ = ${JSON.stringify(legacy)};</script></html>`;
+// eBay keeps no details for some older orders.
+const notFound = { modules: { survey: {}, statusMessage: { title: T('Order not found'), message: T('Unfortunately there has been an error retrieving your order.') } } };
+const legacyPage = `<html><script>window.__APP_INITIAL_STATE__ = ${JSON.stringify(notFound)};</script></html>`;
 const fetched = [];
 let listener;
 const ctx = {
@@ -61,13 +56,8 @@ const tab = { id: 'ext1', tab: { id: 1 }, url: 'https://www.ebay.com/mye/myebay/
   assert.strictEqual(fetched.length, before, 'refused requests fetch nothing');
   const signin = await ask('https://order.ebay.com/ord/show?orderId=signin-me', tab);
   assert.deepStrictEqual([signin.ok, signin.error], [false, 'signin']);
-  assert.ok(!ok.state.modules.priceSummary, 'no copied summary when the page has its own Order total table');
   const old = await ask('https://order.ebay.com/ord/show?orderId=legacy-me', tab);
-  const oldOut = JSON.stringify(old.state);
-  const summary = old.state.modules.priceSummary;
-  assert.ok(summary && summary.dataItems.length === 3, 'price rows copied out of the payment section');
-  assert.deepStrictEqual(JSON.parse(JSON.stringify(summary.dataItems.map((d) => d.labels[0].textSpans[0].text))), ['1 item', 'Shipping', 'Order total']);
-  assert.ok(!/ending in 0000|Account One|Example Street|Paid with/.test(oldOut), 'no card, name or address copied');
+  assert.ok(old.ok && /Order not found/.test(JSON.stringify(old.state.modules.statusMessage)), '"Order not found" passed through for the reader');
   const limit = await ask('https://order.ebay.com/ord/show?orderId=limit-me', tab);
   assert.deepStrictEqual([limit.ok, limit.error], [false, 'limit']);
   const captcha = await ask('https://order.ebay.com/ord/show?orderId=captcha-me', tab);

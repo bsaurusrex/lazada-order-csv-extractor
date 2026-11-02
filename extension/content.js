@@ -1058,7 +1058,11 @@
   //    total") and an item table (Quantity, Item name, Shipping service, Item
   //    price); shipment "Tracking details" "Number".
   const EB_LIST_PATH = '/mye/myebay/ajax/v2/purchase/mp/get?modules=ALL_TRANSACTIONS&moduleId=122164&pg=purchase&mp=purchase-module-v2&type=v2';
-  const ebText = (x) => (Array.isArray(x) ? x.map(ebText).join(' ')
+  // eBay sends some text HTML-escaped ("Square 2.5 &#x2a; 2.5cm").
+  const ebEntities = (t) => t.replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(Number(d)))
+    .replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&');
+  const ebText = (x) => ebEntities(Array.isArray(x) ? x.map(ebText).join(' ')
     : x && Array.isArray(x.textSpans) ? x.textSpans.map((t) => (t && t.text) || '').join('')
     : typeof x === 'string' ? x : '').replace(/\s+/g, ' ').trim();
   const EB_SYMBOLS = [[/US\s?\$/, 'USD'], [/S\$|SGD/, 'SGD'], [/AU\s?\$|AUD/, 'AUD'], [/C\s?\$|CAD/, 'CAD'], [/£|GBP/, 'GBP'], [/€|EUR/, 'EUR'], [/HK\$|HKD/, 'HKD']];
@@ -1161,6 +1165,7 @@
   };
   const ebBlocked = (e) => /daily limit|security check/i.test((e && e.message) || '');
   let ebDetailStop = '';
+  let ebNotFound = 0;
   // Orders already read in full by this version, from the export being updated.
   let ebReuse = null;
 
@@ -1205,7 +1210,8 @@
     if (!table) return [];
     const col = (re) => table.head.findIndex((h) => re.test(h));
     const q = col(/^qty|quantity/i), name = col(/item name|item$/i), svc = col(/shipping service|service/i), price = col(/item price|price/i);
-    return table.rows.map((c) => ({ qty: parseInt(c[q], 10) || 1, title: c[name] || '', service: svc >= 0 ? c[svc] || '' : '', priceText: c[price] || '' }));
+    // Item names there end with the listing number, "… *NEW* (236128852999)": kept in itemId instead.
+    return table.rows.map((c) => ({ qty: parseInt(c[q], 10) || 1, title: (c[name] || '').replace(/\s*\(\d{9,15}\)\s*$/, ''), service: svc >= 0 ? c[svc] || '' : '', priceText: c[price] || '' }));
   }
 
   // One order's rows: the list entry, completed from its detail page when read.
@@ -1232,7 +1238,13 @@
       else if (/\b(gst|tax|vat)\b|gst\*/.test(l)) { sums.tax += v; hasTax = true; }
       else { sums.fees += v; hasFees = true; }   // import charges, handling and any other added fee
     }
+    // A refunded order's "Order total" is net of the refund (US $0.00 after a
+    // full refund); what was charged is "Amount paid", the refund its own column.
+    if (sums.paid != null && sums.refund && sums.total != null && Math.abs(sums.total - (sums.paid - sums.refund)) < 0.011) sums.total = sums.paid;
     if (sums.total == null) sums.total = ebMoney(get(/^total$/i, /order info/i)) ?? ebMoney(o.totalText);
+    // eBay keeps no details for some older orders: the page says "Order not found".
+    const notFound = !!st && !pairs.length && /order not found/i.test(JSON.stringify(st.modules.statusMessage || ''));
+    if (notFound) charges.push('eBay: order details no longer available');
     const placed = ebDateTime(get(/^time placed$/i)) || ebDateTime(get(/^placed on$/i)) || o.date;
     const paid = ebDateTime(get(/^paid on$/i));
     const tracking = [...new Set(pairs.filter((p) => /^(tracking )?number$/i.test(p.label) && /track/i.test(p.sec)).map((p) => p.value))].join(' | ');
@@ -1258,9 +1270,22 @@
     const cancelled = /cancel/i.test(o.status);
     const n = Math.max(table.length, o.cards.length);
     const rows = [];
+    // Each list item matches one table row: by title, then by quantity (the same
+    // listing bought in two variations has two items with one title), else by
+    // position.
+    const used = new Set();
+    const sameTitle = (c, t) => c.title && t.title && (t.title.startsWith(c.title.slice(0, 30)) || c.title.startsWith(t.title.slice(0, 30)));
+    const pick = (t, i) => {
+      const free = o.cards.map((c, j) => j).filter((j) => !used.has(j));
+      const byTitle = t ? free.filter((j) => sameTitle(o.cards[j], t)) : [];
+      const j = byTitle.find((x) => o.cards[x].qty === t.qty) ?? byTitle[0] ?? (free.includes(i) ? i : free[0]);
+      if (j == null) return {};
+      used.add(j);
+      return o.cards[j];
+    };
     for (let i = 0; i < n; i++) {
       const t = table[i];
-      const card = (t && o.cards.find((c) => c.title && t.title && (t.title.startsWith(c.title.slice(0, 30)) || c.title.startsWith(t.title.slice(0, 30))))) || o.cards[i] || {};
+      const card = pick(t, i);
       const qty = (t && t.qty) || card.qty || 1;
       const p = t ? prices[i] : null;
       // Older orders have no item table: a single item's line is the items subtotal.
@@ -1287,7 +1312,9 @@
         // Multi-item orders say only "Multiple items": each item's delivery line says more.
         status: cancelled ? 'Cancelled' : (/^multiple items$/i.test(o.status) && card.delivery ? card.delivery : o.status),
         statusDetail: o.status, itemStatus: card.delivery || '', refunded: '',
-        title: (t && t.title) || card.title || '', variation: card.variation || '',
+        // eBay has purged some old listings: no title anywhere, even on the item page.
+        title: (t && t.title) || card.title || (card.listingId ? `eBay listing ${card.listingId} (no longer on eBay)` : ''),
+        variation: card.variation || '',
         quantity: qty,
         price: line != null ? (line / qty).toFixed(2) : '',
         unitPricePaid: '',
@@ -1335,7 +1362,12 @@
         }
         if (!ebDetailStop) await sleep(350 + Math.random() * 250);
       }
-      rows.push(...ebParseOrder(o, st, page));
+      const got = ebParseOrder(o, st, page);
+      if (got.some((r) => /details no longer available/.test(r.charges))) ebNotFound++;
+      rows.push(...got);
+    }
+    if (page * 10 >= ebOrders.length && ebNotFound) {
+      log(`eBay no longer keeps details for ${ebNotFound} older ${ebNotFound === 1 ? 'order' : 'orders'} ("Order not found"): exported from the purchase list (date, items, seller, total) without a price breakdown.`);
     }
     return { rows, raw: [], totalPages: Math.ceil(ebOrders.length / 10) || 0, hasMore: page * 10 < ebOrders.length, empty: !batch.length };
   }
@@ -2003,7 +2035,7 @@
   // Bump a marketplace's version when its detail pass learns to read more:
   // orders read by any other version are offered again. CHANGELOG.md says what
   // each version added.
-  const DETAILS_VERSION = IS_SHOPEE ? '9' : IS_ALIEXPRESS ? 'ae1' : IS_AMAZON ? 'amz1' : IS_EBAY ? 'eb1' : '4';
+  const DETAILS_VERSION = IS_SHOPEE ? '9' : IS_ALIEXPRESS ? 'ae1' : IS_AMAZON ? 'amz1' : IS_EBAY ? 'eb2' : '4';
 
   function undatedOrders() {
     const dated = new Set();
@@ -2523,7 +2555,11 @@
         // eBay's publicUserId: an opaque, stable account ID (letters and digits,
         // no name in it) that the page carries as "publicUserId=…". Never the
         // username, which the page also carries as "userId".
-        const m = document.documentElement.innerHTML.match(/publicUserId["']?\s*[=:]\s*["']?([A-Za-z0-9]{8,20})\b/);
+        // Seen plain ("publicUserId=…") and percent-encoded ("publicUserId%3D…"),
+        // and as "puid" in the page's tracking data.
+        const html = document.documentElement.innerHTML;
+        const m = html.match(/publicUserId(?:["']?\s*[=:]\s*["']?|%3D)([A-Za-z0-9]{8,20})\b/)
+          || html.match(/\\?["']puid\\?["']\s*:\s*\\?["']([A-Za-z0-9]{8,20})\\?["']/);
         if (m && EBAY_PUBLIC_ID.test(m[1])) id = m[1];
       } else if (IS_ALIEXPRESS) {
         let raw = '';
@@ -2637,6 +2673,7 @@
     let prior = merging ? state.rows : [];
     if (IS_EBAY) {
       ebDetailStop = '';
+      ebNotFound = 0;
       ebReuse = new Map();
       for (const r of prior) {
         if (r.detailsVersion !== DETAILS_VERSION || !r.purchasedAt) continue;
