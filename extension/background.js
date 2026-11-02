@@ -82,6 +82,28 @@ function scrub(node, depth = 0) {
   return out;
 }
 
+// The price breakdown, copied out of the payment section. Older orders have no
+// printer-friendly "Order total" table: their breakdown appears only beside the
+// payment details, which are dropped whole. Only rows whose label is a known
+// breakdown line and whose value is a plain amount are copied, so no card,
+// name or address text can pass.
+const PRICE_LABEL = /^(\d+ items?|items?|item subtotal|subtotal|shipping|postage|postage and packaging|delivery|shipping discount|tax|sales tax|estimated tax|gst\*?|vat\*?|import charges|import fees|item discount|discount|coupon|.{0,20}savings|order total|total|amount paid|total refunded\**|refund|ebay bucks|gift card)$/i;
+const AMOUNT = /^-?\s*(?:[A-Z]{1,3}\s?)?[$£€]\s?-?\d[\d,]*(?:\.\d{2})?$/;
+function priceRows(node, depth = 0, out = []) {
+  if (depth > 30 || !node || typeof node !== 'object') return out;
+  if (Array.isArray(node)) { node.forEach((x) => priceRows(x, depth + 1, out)); return out; }
+  const label = textOf(node.labels || node.label || node.key).replace(/\s+/g, ' ').trim();
+  const value = textOf(node.values || node.value).replace(/\s+/g, ' ').trim();
+  if (label && value && PRICE_LABEL.test(label) && AMOUNT.test(value)) out.push([label, value]);
+  for (const [k, v] of Object.entries(node)) if (!['labels', 'label', 'key', 'values', 'value'].includes(k)) priceRows(v, depth + 1, out);
+  return out;
+}
+const hasOrderTotal = (node, depth = 0) => {
+  if (depth > 30 || !node || typeof node !== 'object') return false;
+  if (!Array.isArray(node) && node.title && /^order total$/i.test(textOf(node.title).trim()) && JSON.stringify(node).includes('"labels"')) return true;
+  return Object.values(node).some((v) => hasOrderTotal(v, depth + 1));
+};
+
 function stateFrom(html) {
   const at = html.indexOf('window.__APP_INITIAL_STATE__');
   if (at < 0) return null;
@@ -110,7 +132,15 @@ async function ebayDetail(url) {
   const state = stateFrom(html);
   if (!state || !state.modules) return { ok: false, error: 'no order data on the page' };
   const personal = [...personalValues(state.modules)].sort((a, b) => b.length - a.length);
-  return { ok: true, state: { modules: redact(scrub(state.modules), personal) } };
+  const modules = redact(scrub(state.modules), personal);
+  if (!hasOrderTotal(modules) && state.modules.paymentInfo) {
+    const rows = priceRows(state.modules.paymentInfo);
+    const seen = new Set();
+    const items = rows.filter(([l, v]) => !seen.has(`${l}=${v}`) && seen.add(`${l}=${v}`))
+      .map(([l, v]) => ({ labels: [{ textSpans: [{ text: l }] }], values: [{ textSpans: [{ text: v }] }] }));
+    if (items.length) modules.priceSummary = { title: { textSpans: [{ text: 'Order total' }] }, dataItems: items };
+  }
+  return { ok: true, state: { modules } };
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, respond) => {

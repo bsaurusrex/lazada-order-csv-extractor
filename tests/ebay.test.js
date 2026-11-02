@@ -22,9 +22,10 @@ const O1 = '11-11111-11111', O2 = '22-22222-22222', O3 = '100000000001-200000000
 const page1 = [entry(O1, 'Delivered', 'Nov 30, 2025', '184.51', [card(O1, '100000000101', 'Example remote controller', 184.51, 2)]),
   { heading: T('Recently viewed') },
   entry(O2, 'Delivered', 'Mar 3, 2024', '30.50', [card(O2, '100000000201', 'Example cable', 10, 1, ['Colour: Black']), card(O2, '100000000202', 'Example adapter', 15, 1)])];
-const O4 = '44-44444-44444';
+const O4 = '44-44444-44444', O5 = '100000000005-2000000000005';
 const page2 = [entry(O3, 'Canceled', 'Jun 1, 2017', '9.99', [card(O3, '100000000001', 'Example old item', 9.99, 1)]),
-  entry(O4, 'Refunded', 'Dec 28, 2016', '20.00', [card(O4, '100000000401', 'Example refunded item', 20, 1)])];
+  entry(O4, 'Refunded', 'Dec 28, 2016', '20.00', [card(O4, '100000000401', 'Example refunded item', 20, 1)]),
+  entry(O5, 'Delivered', 'Feb 2, 2016', '28.64', [card(O5, '100000000501', 'Example older-layout item', 28.64, 1)])];
 const listJson = (items) => ({ isSignin: true, modules: { RIVER: [{ data: { items } }] } });
 const pages = (u) => { const p = Number(new URL(u).searchParams.get('page')); return listJson(p === 1 ? page1 : p === 2 ? page2 : []); };
 
@@ -45,6 +46,9 @@ const details = {
   [O2]: detail('Mar 3, 2024 at 9:05 AM', [['2 items', '$25.00'], ['Shipping', '$5.50'], ['Order total', '$30.50']],
     [[1, 'Example cable', '$10.00'], [1, 'Example adapter', '$15.00']]),
   [O3]: detail('Jun 1, 2017 at 11:00 PM', [['1 item', '$9.99'], ['Order total', '$9.99']], [[1, 'Example old item', '$9.99']]),
+  // Older layout, as background.js returns it: the breakdown copied out as priceSummary, no item table.
+  [O5]: { modules: { orderInfo: { title: T('Order info'), sections: [{ dataItems: [pair('Time placed', 'Feb 2, 2016 at 10:00 AM'), pair('Total', '$28.64')] }] },
+    priceSummary: { title: T('Order total'), dataItems: [pair('1 item', '$25.00'), pair('Shipping', '$3.64'), pair('Order total', '$28.64')] } } },
   [O4]: detail('Dec 28, 2016 at 8:00 PM', [['1 item', '$20.00'], ['Order total', '$20.00'], ['Amount paid', '$20.00'], ['Total refunded**', '$20.00']], [[1, 'Example refunded item', '$20.00']]),
 };
 let failO2Once = true;
@@ -70,7 +74,10 @@ run({ src, interceptorSrc, host: 'www.ebay.com', noCapture: true, captureRec: {}
   const g = (l, k) => l[H.indexOf(k)];
   const K = ['orderId', 'purchasedAt', 'status', 'quantity', 'price', 'lineTotal', 'subtotal', 'shippingFee', 'tax', 'discount', 'orderTotal', 'totalsCheck', 'currency', 'trackingNumber', 'shopName'];
   for (const l of rows) console.log(K.map((k) => `${k}=${g(l, k)}`).join(' '));
-  assert.strictEqual(rows.length, 5, 'five item rows, page furniture skipped');
+  assert.strictEqual(rows.length, 6, 'six item rows, page furniture skipped');
+  const older = rows.find((l) => g(l, 'orderId') === O5);
+  assert.deepStrictEqual(['lineTotal', 'price', 'subtotal', 'shippingFee', 'orderTotal', 'totalsCheck', 'purchasedAt'].map((k) => g(older, k)),
+    ['25.00', '25.00', '25.00', '3.64', '28.64', 'ok', '2016-02-02 10:00:00'], 'older layout: breakdown from priceSummary, line from the subtotal');
   const ref = rows.find((l) => g(l, 'orderId') === O4);
   assert.deepStrictEqual(['amountPaid', 'refundAmount', 'otherFees', 'totalsCheck', 'status'].map((k) => g(ref, k)), ['20.00', '20.00', '', 'ok', 'refunded'], 'refund lines');
   assert.ok(rows.every((l) => g(l, 'marketplace') === 'ebay.com' && g(l, 'accountId') === PUBLIC_ID), 'publicUserId on every row');
@@ -103,9 +110,9 @@ run({ src, interceptorSrc, host: 'www.ebay.com', noCapture: true, captureRec: {}
     pageHtml: `<script>var b="publicUserId=${PUBLIC_ID},x";</script>` });
   const [H3, ...rows3] = parseCsv(r3.csv.text.replace(/^\uFEFF/, '')).filter((l) => l.length > 1);
   console.log('limit:', r3.st.log.filter((l) => /daily limit/.test(l)).length, 'log line; undated', r3.st.undated, 'reads', reads.length);
-  assert.strictEqual(rows3.length, 5, 'every order still exported');
+  assert.strictEqual(rows3.length, 6, 'every order still exported');
   assert.strictEqual(reads.length, 2, 'no more detail reads after the limit');
-  assert.strictEqual(r3.st.undated, 3, 'three orders wait for details');
+  assert.strictEqual(r3.st.undated, 4, 'four orders wait for details');
   // Without its detail page, the delivery date comes from the list ("Delivered on Sun, Dec 14"),
   // placed on or after the order date (Dec 28, 2016 -> 2017-12-14).
   const ref3 = rows3.find((l) => l[H3.indexOf('orderId')] === O4);

@@ -1263,7 +1263,8 @@
       const card = (t && o.cards.find((c) => c.title && t.title && (t.title.startsWith(c.title.slice(0, 30)) || c.title.startsWith(t.title.slice(0, 30))))) || o.cards[i] || {};
       const qty = (t && t.qty) || card.qty || 1;
       const p = t ? prices[i] : null;
-      const line = p == null ? null : asLines ? p : p * qty;
+      // Older orders have no item table: a single item's line is the items subtotal.
+      const line = p != null ? (asLines ? p : p * qty) : (!table.length && n === 1 && sums.subtotal != null ? sums.subtotal : null);
       rows.push({
         _page: page, _source: 'ebay',
         accountId: '',   // stamped by run() with the signed-in publicUserId

@@ -32,10 +32,11 @@ Newest first.
   status. Without a detail page, the delivery date comes from the list ("Delivered on Sun,
   Dec 14", dated on or after the order).
 
-**Known limit**
-- Older eBay orders (most from 2017-2018 on the account tested) have a detail page without
-  a price breakdown or item table. They export their total, date and items, with line prices
-  and the breakdown blank and `totalsCheck` blank.
+- Older eBay orders (most from 2017-2018 on the account tested) have no printer-friendly
+  price table: their breakdown appears only beside the payment details. The background
+  worker copies out just those price rows (known breakdown labels with plain amounts, never
+  card, name or address text), and a single-item order's line total is its items subtotal.
+  Multi-item older orders keep their breakdown but no per-line prices.
 
 **Changed**
 - PRIVACY.md describes all five marketplaces, the personal data left out of every file, and
