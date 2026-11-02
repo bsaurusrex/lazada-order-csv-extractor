@@ -7,7 +7,9 @@ const T = (text) => ({ textSpans: [{ text }] });
 const pair = (l, v) => ({ labels: [T(l)], values: [T(v)] });
 const state = { modules: {
   deliveryAddress: { title: T('Shipping address'), dataItems: [T('1 Example Street')] },
-  paymentInfo: { title: T('Payment info'), dataItems: [pair('Card', 'ending in 0000')] },
+  paymentInfo: { title: T('Payment info'), dataItems: [pair('Card', 'ending in 0000'), pair('1 item', '$9.99'), pair('Shipping', '$1.00'), pair('Order total', '$9.99')] },
+  // The buyer's name and an address line repeated outside the dropped sections.
+  shipment: { containers: [{ title: T('Shipping to Account One'), text: 'Delivered to 1 Example Street on Sun, Dec 14, 2025' }] },
   orderInfo: { title: T('Order info'), sections: [{ dataItems: [pair('Time placed', 'Nov 30, 2025 at 3:57 PM'), pair('Order number', '11-11111-11111')] }] },
   printerFriendly: { tables: [{ rows: [{ cells: [
     { section: { title: T('Order information'), dataItems: [pair('Buyer', 'account1shopper'), pair('Seller', 'example_seller'), pair('Payment method', 'Card')] } },
@@ -16,11 +18,14 @@ const state = { modules: {
   ] }] }] },
 } };
 const page = `<html><script>window.__APP_INITIAL_STATE__ = ${JSON.stringify(state)};</script></html>`;
+const limitPage = '<html><head><title>Daily limit exceeded</title></head></html>';
 const fetched = [];
 let listener;
 const ctx = {
   URL, JSON, Promise, Set, String, Array, Object, Error, console,
-  fetch: async (url) => { fetched.push(url); const signin = url.includes('signin-me'); return { ok: true, status: 200, url: signin ? 'https://signin.ebay.com/ws/eBayISAPI.dll' : url, text: async () => page }; },
+  fetch: async (url) => { fetched.push(url);
+    const to = url.includes('signin-me') ? 'https://signin.ebay.com/ws/eBayISAPI.dll' : url.includes('limit-me') ? 'https://pages.ebay.com/limit' : url.includes('captcha-me') ? 'https://www.ebay.com/splashui/captcha?x=1' : url;
+    return { ok: true, status: 200, url: to, text: async () => (url.includes('limit-me') ? limitPage : page) }; },
   chrome: { runtime: { id: 'ext1', onMessage: { addListener: (f) => { listener = f; } } } },
 };
 vm.createContext(ctx); vm.runInContext(src, ctx);
@@ -33,6 +38,7 @@ const tab = { id: 'ext1', tab: { id: 1 }, url: 'https://www.ebay.com/mye/myebay/
   assert.ok(!/Example Street|Account One|account1shopper|ending in 0000|Payment method/.test(out), 'address, buyer and payment removed');
   assert.ok(!ok.state.modules.deliveryAddress && !ok.state.modules.paymentInfo, 'personal modules dropped');
   assert.ok(/Order total/.test(out) && /example_seller/.test(out) && /Time placed/.test(out), 'order data kept');
+  assert.ok(/\$9\.99/.test(out) && /Delivered to/.test(out) && /Dec 14, 2025/.test(out), 'amounts and dates survive the redaction');
   const sg = await ask('https://order.ebay.com.sg/ord/show?orderId=1', { ...tab, url: 'https://www.ebay.com.sg/mye/myebay/purchase' });
   assert.ok(sg.ok, 'ebay.com.sg order host allowed');
   for (const bad of ['https://evil.example.com/ord/show?orderId=1', 'http://order.ebay.com/ord/show?orderId=1', 'https://order.ebay.com/account/settings', 'https://www.ebay.com/ord/show']) {
@@ -47,5 +53,9 @@ const tab = { id: 'ext1', tab: { id: 1 }, url: 'https://www.ebay.com/mye/myebay/
   assert.strictEqual(fetched.length, before, 'refused requests fetch nothing');
   const signin = await ask('https://order.ebay.com/ord/show?orderId=signin-me', tab);
   assert.deepStrictEqual([signin.ok, signin.error], [false, 'signin']);
+  const limit = await ask('https://order.ebay.com/ord/show?orderId=limit-me', tab);
+  assert.deepStrictEqual([limit.ok, limit.error], [false, 'limit']);
+  const captcha = await ask('https://order.ebay.com/ord/show?orderId=captcha-me', tab);
+  assert.deepStrictEqual([captcha.ok, captcha.error], [false, 'captcha']);
   console.log('EBAY BACKGROUND PASSED'); process.exit(0);
 })().catch((e) => { console.error('FAIL', e.stack); process.exit(1); });

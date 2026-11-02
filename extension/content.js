@@ -1150,6 +1150,20 @@
     return kept;
   }
 
+  // eBay caps how many order pages an account may open per day ("Daily limit
+  // exceeded", verified Nov 2026) and may show a security check. Either stops
+  // detail reads for this run; the list still exports, and "Add purchase
+  // dates" reads the rest later.
+  const EB_ERRORS = {
+    signin: 'eBay asked to sign in again. Sign in on this tab, then retry.',
+    limit: "eBay's daily limit on opening order pages was reached",
+    captcha: 'eBay showed a security check',
+  };
+  const ebBlocked = (e) => /daily limit|security check/i.test((e && e.message) || '');
+  let ebDetailStop = '';
+  // Orders already read in full by this version, from the export being updated.
+  let ebReuse = null;
+
   // Order details through background.js (see above).
   function ebDetail(url) {
     return new Promise((resolve, reject) => {
@@ -1157,7 +1171,7 @@
         chrome.runtime.sendMessage({ cmd: 'ebayDetail', url }, (res) => {
           const err = chrome.runtime.lastError;
           if (err || !res) return reject(new Error((err && err.message) || 'no answer from the extension'));
-          if (!res.ok) return reject(new Error(res.error === 'signin' ? 'eBay asked to sign in again. Sign in on this tab, then retry.' : res.error));
+          if (!res.ok) return reject(new Error(EB_ERRORS[res.error] || res.error));
           resolve(res.state);
         });
       } catch (e) { reject(e); }
@@ -1199,7 +1213,7 @@
     const pairs = st ? ebPairs(st) : [];
     const get = (re, sec) => (pairs.find((p) => re.test(p.label) && (!sec || sec.test(p.sec))) || {}).value || '';
     const currency = (o.cards.find((c) => c.currency) || {}).currency || ebCurrencyOf(o.totalText) || SITE_CURRENCY;
-    const sums = { subtotal: null, ship: 0, tax: 0, disc: 0, gift: 0, fees: 0, total: null };
+    const sums = { subtotal: null, ship: 0, tax: 0, disc: 0, gift: 0, fees: 0, total: null, paid: null, refund: 0 };
     let hasShip = false, hasTax = false, hasFees = false;
     const charges = [];
     for (const p of pairs.filter((x) => /^order total$/i.test(x.sec))) {
@@ -1209,6 +1223,9 @@
       const l = p.label.toLowerCase();
       if (/^\d+ items?$|subtotal|^items?$/.test(l)) sums.subtotal = v;
       else if (/^order total|^total$/.test(l)) sums.total = v;
+      // Refunded orders add "Amount paid" and "Total refunded**" below the total.
+      else if (/^amount paid/.test(l)) sums.paid = v;
+      else if (/refund/.test(l)) sums.refund += Math.abs(v);
       else if (/gift card|ebay bucks|voucher balance/.test(l)) sums.gift += Math.abs(v);
       else if (v < 0 || /discount|coupon|saving|promo|voucher|credit|reward/.test(l)) sums.disc += Math.abs(v);
       else if (/shipping|postage|delivery/.test(l)) { sums.ship += v; hasShip = true; }
@@ -1221,6 +1238,16 @@
     const tracking = [...new Set(pairs.filter((p) => /^(tracking )?number$/i.test(p.label) && /track/i.test(p.sec)).map((p) => p.value))].join(' | ');
     const shipText = st ? JSON.stringify(st.modules.shipment || {}) : '';
     const delivered = ((shipText.match(/Delivered on [A-Za-z]{3}, ([A-Za-z]{3,9} \d{1,2}, \d{4})/) || [])[1]) || '';
+    // The list says "Delivered on Sun, Dec 14" without a year: the first such
+    // date on or after the order date.
+    const listDelivered = (card) => {
+      const m = String(card.delivery || '').match(/Delivered on (?:[A-Za-z]{3}, )?([A-Za-z]{3,9}) (\d{1,2})\b(?!,? \d{4})/);
+      const base = placed || o.date;
+      if (!m || !base) return '';
+      const y = Number(base.slice(0, 4));
+      const d = amzDate(`${m[1]} ${m[2]}, ${y}`);
+      return d && d < base.slice(0, 10) ? amzDate(`${m[1]} ${m[2]}, ${y + 1}`) : d;
+    };
     const seller = get(/^sold by$/i) || get(/^seller$/i);
     const table = st ? ebItemTable(st) : [];
     // "Item price" is the line's total on eBay's page ("2 items $118.00" with one
@@ -1242,11 +1269,11 @@
         accountId: '',   // stamped by run() with the signed-in publicUserId
         orderId: o.orderId, orderSn: '',
         lineId: `${o.orderId}-${card.listingId || i}-${i}`,
-        purchasedAt: placed, paidAt: paid, shippedAt: '', deliveredAt: amzDate(delivered), completedAt: '',
+        purchasedAt: placed, paidAt: paid, shippedAt: '', deliveredAt: amzDate(delivered) || listDelivered(card), completedAt: '',
         cancelledAt: '', cancelReason: '',
         carrier: '', trackingNumber: tracking, parcels: '',
         deliveryMethod: t ? t.service : '',
-        amountPaid: '', coinsEarned: '',
+        amountPaid: sums.paid != null ? sums.paid.toFixed(2) : '', coinsEarned: '',
         subtotal: sums.subtotal != null ? sums.subtotal.toFixed(2) : '',
         shippingFee: hasShip ? sums.ship.toFixed(2) : '',
         tax: hasTax ? sums.tax.toFixed(2) : '',
@@ -1254,9 +1281,11 @@
         discount: sums.disc ? sums.disc.toFixed(2) : '',
         giftCardAmount: sums.gift ? sums.gift.toFixed(2) : '',
         orderTotal: sums.total != null ? sums.total.toFixed(2) : '',
-        cashback: '', refundAmount: '',
+        cashback: '', refundAmount: sums.refund ? sums.refund.toFixed(2) : '',
         charges: charges.join(' | '),
-        status: cancelled ? 'Cancelled' : o.status, statusDetail: o.status, itemStatus: card.delivery || '', refunded: '',
+        // Multi-item orders say only "Multiple items": each item's delivery line says more.
+        status: cancelled ? 'Cancelled' : (/^multiple items$/i.test(o.status) && card.delivery ? card.delivery : o.status),
+        statusDetail: o.status, itemStatus: card.delivery || '', refunded: '',
         title: (t && t.title) || card.title || '', variation: card.variation || '',
         quantity: qty,
         price: line != null ? (line / qty).toFixed(2) : '',
@@ -1282,14 +1311,28 @@
     const rows = [];
     for (const o of batch) {
       if (state.cancel) break;
+      const known = ebReuse && ebReuse.get(o.orderId);
+      if (known) {
+        // Already read in full: keep those rows, refresh what the list says now.
+        const fresh = ebParseOrder(o, null, page);
+        rows.push(...known.map((r, i) => {
+          const f = fresh.find((x) => x.itemId && x.itemId === r.itemId) || fresh[i] || {};
+          return { ...r, _page: page, status: f.status || r.status, statusDetail: f.statusDetail || r.statusDetail,
+                   itemStatus: f.itemStatus || r.itemStatus, deliveredAt: r.deliveredAt || f.deliveredAt || '' };
+        }));
+        continue;
+      }
       let st = null;
-      if (o.url) {
+      if (o.url && !ebDetailStop) {
         try { st = await ebDetail(o.url); }
         catch (e) {
           if (/sign in/i.test(e.message)) throw e;
-          log(`Order ${o.orderId}: ${e.message}`);
+          if (ebBlocked(e)) {
+            ebDetailStop = e.message;
+            log(`${e.message}: the remaining orders are exported from the list without their details. Press "Add purchase dates" later (eBay's limit resets daily) to complete them.`);
+          } else log(`Order ${o.orderId}: ${e.message}`);
         }
-        await sleep(350 + Math.random() * 250);
+        if (!ebDetailStop) await sleep(350 + Math.random() * 250);
       }
       rows.push(...ebParseOrder(o, st, page));
     }
@@ -1320,7 +1363,10 @@
         got++;
       } catch (e) {
         log(`Order ${id}: ${e.message}`);
-        if (/sign in/i.test(e.message)) { state.detailError = e.message; break; }
+        if (/sign in/i.test(e.message) || ebBlocked(e)) {
+          state.detailError = ebBlocked(e) ? `${e.message}. ${ids.length - got} orders still need details: try again tomorrow.` : e.message;
+          break;
+        }
       }
       state.progress.done = i + 1;
       await sleep(delayMs + Math.random() * 200);
@@ -2588,6 +2634,16 @@
     const start = opts.startPage || 1;
     let merging = !opts.full && start === 1 && !opts.endPage && state.rows.length > 0;
     let prior = merging ? state.rows : [];
+    if (IS_EBAY) {
+      ebDetailStop = '';
+      ebReuse = new Map();
+      for (const r of prior) {
+        if (r.detailsVersion !== DETAILS_VERSION || !r.purchasedAt) continue;
+        const k = String(r.orderId);
+        if (!ebReuse.has(k)) ebReuse.set(k, []);
+        ebReuse.get(k).push(r);
+      }
+    }
     let priorByKey = new Map(prior.map((r) => [rowKey(r), r]));
     let stopEarly = merging && state.complete && coversCutoff();
     let hadDates = prior.some((r) => r.purchasedAt);
@@ -2857,7 +2913,7 @@
     ['cancelled', /cancel|closed|expired|failed|unsuccessful/i],
     ['completed', /complete|finished|received|confirm(ed)? receipt|rated|review/i],
     ['delivered', /deliver(ed|y completed)|arrived|collected/i],
-    ['shipped', /ship(ped)?\b|in transit|to receive|dispatch|out for delivery|awaiting delivery|on the way/i],
+    ['shipped', /ship(ped)?\b|in transit|to receive|dispatch|out for delivery|awaiting delivery|on the way|tracking available/i],
     ['pending', /unpaid|to pay|awaiting payment|pending payment|payment pending/i],
     ['processing', /processing|to ship|packing|ready to ship|awaiting shipment|confirmed|placed/i],
     ['paid', /\bpaid\b/i],

@@ -22,7 +22,9 @@ const O1 = '11-11111-11111', O2 = '22-22222-22222', O3 = '100000000001-200000000
 const page1 = [entry(O1, 'Delivered', 'Nov 30, 2025', '184.51', [card(O1, '100000000101', 'Example remote controller', 184.51, 2)]),
   { heading: T('Recently viewed') },
   entry(O2, 'Delivered', 'Mar 3, 2024', '30.50', [card(O2, '100000000201', 'Example cable', 10, 1, ['Colour: Black']), card(O2, '100000000202', 'Example adapter', 15, 1)])];
-const page2 = [entry(O3, 'Canceled', 'Jun 1, 2017', '9.99', [card(O3, '100000000001', 'Example old item', 9.99, 1)])];
+const O4 = '44-44444-44444';
+const page2 = [entry(O3, 'Canceled', 'Jun 1, 2017', '9.99', [card(O3, '100000000001', 'Example old item', 9.99, 1)]),
+  entry(O4, 'Refunded', 'Dec 28, 2016', '20.00', [card(O4, '100000000401', 'Example refunded item', 20, 1)])];
 const listJson = (items) => ({ isSignin: true, modules: { RIVER: [{ data: { items } }] } });
 const pages = (u) => { const p = Number(new URL(u).searchParams.get('page')); return listJson(p === 1 ? page1 : p === 2 ? page2 : []); };
 
@@ -43,6 +45,7 @@ const details = {
   [O2]: detail('Mar 3, 2024 at 9:05 AM', [['2 items', '$25.00'], ['Shipping', '$5.50'], ['Order total', '$30.50']],
     [[1, 'Example cable', '$10.00'], [1, 'Example adapter', '$15.00']]),
   [O3]: detail('Jun 1, 2017 at 11:00 PM', [['1 item', '$9.99'], ['Order total', '$9.99']], [[1, 'Example old item', '$9.99']]),
+  [O4]: detail('Dec 28, 2016 at 8:00 PM', [['1 item', '$20.00'], ['Order total', '$20.00'], ['Amount paid', '$20.00'], ['Total refunded**', '$20.00']], [[1, 'Example refunded item', '$20.00']]),
 };
 let failO2Once = true;
 const runtimeSend = (msg) => {
@@ -67,7 +70,9 @@ run({ src, interceptorSrc, host: 'www.ebay.com', noCapture: true, captureRec: {}
   const g = (l, k) => l[H.indexOf(k)];
   const K = ['orderId', 'purchasedAt', 'status', 'quantity', 'price', 'lineTotal', 'subtotal', 'shippingFee', 'tax', 'discount', 'orderTotal', 'totalsCheck', 'currency', 'trackingNumber', 'shopName'];
   for (const l of rows) console.log(K.map((k) => `${k}=${g(l, k)}`).join(' '));
-  assert.strictEqual(rows.length, 4, 'four item rows, page furniture skipped');
+  assert.strictEqual(rows.length, 5, 'five item rows, page furniture skipped');
+  const ref = rows.find((l) => g(l, 'orderId') === O4);
+  assert.deepStrictEqual(['amountPaid', 'refundAmount', 'otherFees', 'totalsCheck', 'status'].map((k) => g(ref, k)), ['20.00', '20.00', '', 'ok', 'refunded'], 'refund lines');
   assert.ok(rows.every((l) => g(l, 'marketplace') === 'ebay.com' && g(l, 'accountId') === PUBLIC_ID), 'publicUserId on every row');
   assert.ok(!r.csv.text.includes(USERNAME), 'username never exported');
   const one = rows.find((l) => g(l, 'orderId') === O1);
@@ -88,5 +93,29 @@ run({ src, interceptorSrc, host: 'www.ebay.com', noCapture: true, captureRec: {}
   console.log('from 2020: detail reads', asked.length, 'list pages', listPages.join(','));
   assert.ok(!asked.includes(O3) && !r2.csv.text.includes(O3), '2017 order skipped');
   assert.deepStrictEqual(listPages, ['1', '2'], 'stops at the page that is all older');
+  // Daily limit after the first detail read: the rest still export from the
+  // list, without details; a later "Add purchase dates" completes them.
+  let limitOn = true; const reads = [];
+  const limited = (msg) => { const id = new URL(msg.url).searchParams.get('orderId'); reads.push(id);
+    if (limitOn && reads.length > 1) return { ok: false, error: 'limit' };
+    return { ok: true, state: JSON.parse(JSON.stringify(details[id])) }; };
+  const r3 = await run({ src, interceptorSrc, host: 'www.ebay.com', noCapture: true, captureRec: {}, cookie: '', pages, runtimeSend: limited,
+    pageHtml: `<script>var b="publicUserId=${PUBLIC_ID},x";</script>` });
+  const [H3, ...rows3] = parseCsv(r3.csv.text.replace(/^\uFEFF/, '')).filter((l) => l.length > 1);
+  console.log('limit:', r3.st.log.filter((l) => /daily limit/.test(l)).length, 'log line; undated', r3.st.undated, 'reads', reads.length);
+  assert.strictEqual(rows3.length, 5, 'every order still exported');
+  assert.strictEqual(reads.length, 2, 'no more detail reads after the limit');
+  assert.strictEqual(r3.st.undated, 3, 'three orders wait for details');
+  // Without its detail page, the delivery date comes from the list ("Delivered on Sun, Dec 14"),
+  // placed on or after the order date (Dec 28, 2016 -> 2017-12-14).
+  const ref3 = rows3.find((l) => l[H3.indexOf('orderId')] === O4);
+  assert.strictEqual(ref3[H3.indexOf('deliveredAt')], '2017-12-14');
+  // Next run updates the saved export: complete orders are not opened again.
+  limitOn = false; reads.length = 0;
+  const r4 = await run({ src, interceptorSrc, host: 'www.ebay.com', noCapture: true, captureRec: {}, cookie: '', pages, runtimeSend: limited,
+    pageHtml: `<script>var b="publicUserId=${PUBLIC_ID},x";</script>`, preStore: r.store });
+  console.log('update: detail reads', reads.length, 'undated', r4.st.undated);
+  assert.strictEqual(reads.length, 0, 'orders already read in full are reused');
+  assert.strictEqual(r4.st.undated, 0);
   console.log('EBAY PASSED'); process.exit(0);
 }).catch((e) => { console.error('FAIL', e.stack); process.exit(1); });

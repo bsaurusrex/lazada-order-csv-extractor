@@ -14,15 +14,28 @@ Newest first.
   background worker (`background.js`) fetches them. It accepts only
   `https://order.ebay.com[.sg]/ord/show` addresses, answers only the extension's own eBay
   tabs, and removes the delivery address, payment details and buyer name before returning
-  the order data.
+  the order data, also blanking those values wherever else the page repeats them.
 - `accountId` is eBay's `publicUserId`: an opaque, stable account ID with no name in it.
   The username, which eBay pages also carry, is never read into an export.
 - One eBay account covers every eBay site, so `ebay.com` and `ebay.com.sg` share one saved
   export and every row is labelled `marketplace` = `ebay.com`.
 - "Only orders from" works on eBay: the list stops at the first page whose orders are all
   older, and older orders are never opened.
+- eBay caps how many order pages an account may open per day ("Daily limit exceeded"). When
+  the cap or a security check is hit, the export carries on from the list alone, says how
+  many orders still need details, and **Add purchase dates** completes them another day.
+  Orders already read in full are reused on the next export, never opened again.
 - An order whose detail page fails is exported from the list and re-read by
   **Add purchase dates**.
+- Refunded orders: "Amount paid" goes to `amountPaid` and "Total refunded" to `refundAmount`.
+  "Tracking available" counts as shipped; multi-item orders take each item's own delivery
+  status. Without a detail page, the delivery date comes from the list ("Delivered on Sun,
+  Dec 14", dated on or after the order).
+
+**Known limit**
+- Older eBay orders (most from 2017-2018 on the account tested) have a detail page without
+  a price breakdown or item table. They export their total, date and items, with line prices
+  and the breakdown blank and `totalsCheck` blank.
 
 **Changed**
 - PRIVACY.md describes all five marketplaces, the personal data left out of every file, and

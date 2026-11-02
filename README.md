@@ -108,6 +108,10 @@ order pages for the extension's own eBay tab, accepts no other address, and remo
 address, payment and buyer sections before handing the order data back. One eBay account
 covers every eBay site, so `ebay.com` and `ebay.com.sg` share one export.
 
+eBay caps how many order pages an account may open per day. A first export of a long history
+may stop reading details partway: the export still lists every order, and **Add purchase
+dates** finishes the rest later. Later exports reuse orders already read in full.
+
 ### Response shape
 
 `module.data` is a flat entity map, not an array:
